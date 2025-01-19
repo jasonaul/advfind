@@ -28,16 +28,36 @@
     <button id="searchButton">Search</button>
     <button id="clearButton">Clear</button> 
 
-    <div id="proximity-search-container" style="display: none;">
-        <label for="searchTerm2">Second Search Term:</label>
-        <input type="text" id="searchTerm2" placeholder="Enter second term" />
+    <div id="proximity-controls">
+      <label class="checkbox-label">
+          <input type="checkbox" id="proximitySearchCheckbox" />
+          Enable Proximity Search
+      </label>
   
-        <label for="proximityValue">Proximity:</label>
-        <input type="number" id="proximityValue" min="1" value="5" />
+      <div id="proximity-search-container" style="display: none;">
+          <div class="input-group">
+              <label for="searchTerm2">Second Search Term:</label>
+              <input 
+                  type="text" 
+                  id="searchTerm2" 
+                  placeholder="Enter second term to search"
+                  class="search-input" 
+              />
+          </div>
+  
+          <div class="input-group">
+              <label for="proximityValue">Maximum Words Between:</label>
+              <input 
+                  type="number" 
+                  id="proximityValue" 
+                  min="1" 
+                  max="50" 
+                  value="10" 
+                  class="number-input"
+              />
+          </div>
       </div>
-  
-      <input type="checkbox" id="proximitySearchCheckbox" />
-      <label for="proximitySearchCheckbox">Proximity Search</label>
+  </div>
 
     <div id="matchCount"></div>
 

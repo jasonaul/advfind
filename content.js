@@ -52,18 +52,29 @@
     }
 
     function handleSearchText(request, sendResponse) {
-        const { searchTerm, options } = request.payload;
-
+        const { searchTerm, searchTerm2, proximityValue, options } = request.payload;
+    
         if (!searchTerm || searchTerm.trim() === "") {
             console.log("Empty search term received.");
             highlightManager.removeHighlights();
             sendResponse({ success: false, count: 0, error: "Search term is empty" });
             return;
         }
-
+    
         try {
-            const matchCount = highlightManager.highlightAndNavigateMatches(searchTerm, options, "none");
-            console.log(`Highlighted ${matchCount} instances of "${searchTerm}"`);
+            let matchCount;
+            if (options.proximitySearch && searchTerm2) {
+                matchCount = highlightManager.highlightProximityMatches(
+                    searchTerm,
+                    searchTerm2,
+                    proximityValue,
+                    options.caseSensitive
+                );
+            } else {
+                matchCount = highlightManager.highlightAndNavigateMatches(searchTerm, options, "none");
+            }
+            
+            console.log(`Highlighted ${matchCount} instances`);
             sendResponse({ success: true, count: matchCount });
         } catch (error) {
             console.error("Error during text highlighting:", error);

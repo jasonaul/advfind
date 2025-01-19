@@ -86,6 +86,7 @@ document.addEventListener("DOMContentLoaded", () => {
     function initializeUI() {
         updateStatus("Extension is ready!");
         setupEventListeners();
+        setupProximitySearchUI(); 
     }
 
     function setupEventListeners() {
@@ -117,22 +118,39 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
+    function setupProximitySearchUI() {
+        const proximitySearchCheckbox = document.getElementById("proximitySearchCheckbox");
+        const proximitySearchContainer = document.getElementById("proximity-search-container");
+        
+        if (proximitySearchCheckbox && proximitySearchContainer) {
+            proximitySearchCheckbox.addEventListener("change", (event) => {
+                proximitySearchContainer.style.display = event.target.checked ? "block" : "none";
+            });
+        }
+    }
+
     function handleSearch(searchTerm) {
         if (!contentScriptReady || !activeTabId) {
             console.error("Content script not ready or no active tab");
             return;
         }
-
+    
         const caseSensitive = document.getElementById("caseSensitiveCheckbox")?.checked || false;
         const wholeWords = document.getElementById("wholeWordsCheckbox")?.checked || false;
         const useRegex = document.getElementById("regexCheckbox")?.checked || false;
         const proximitySearch = document.getElementById("proximitySearchCheckbox")?.checked || false;
-
+        
+        // Add these lines for proximity search
+        const searchTerm2 = document.getElementById("searchTerm2")?.value || "";
+        const proximityValue = parseInt(document.getElementById("proximityValue")?.value || "5");
+    
         console.log("Sending search request for:", searchTerm);
         chrome.tabs.sendMessage(activeTabId, {
             type: "SEARCH_TEXT",
             payload: {
                 searchTerm: searchTerm,
+                searchTerm2: searchTerm2,
+                proximityValue: proximityValue,
                 options: {
                     caseSensitive,
                     wholeWords,

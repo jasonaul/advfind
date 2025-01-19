@@ -146,7 +146,123 @@
                 console.error('Error during navigation:', error);
             }
         }
-
+        highlightProximityMatches(term1, term2, maxDistance, caseSensitive) {
+            this.removeHighlights();
+            this.matchCount = 0;
+            const walker = window.advancedFindDomUtils.createTextWalker();
+            
+            let node;
+            while ((node = walker.nextNode())) {
+                if (!node || !node.textContent) continue;
+                
+                const text = node.textContent;
+                const flags = caseSensitive ? 'g' : 'gi';
+                const regex1 = new RegExp(`\\b${term1}\\b`, flags);
+                const regex2 = new RegExp(`\\b${term2}\\b`, flags);
+                
+                let positions = [];
+                let match;
+                
+                // Find all matches for both terms
+                while ((match = regex1.exec(text)) !== null) {
+                    positions.push({
+                        index: match.index,
+                        term: 1,
+                        text: match[0],
+                        used: false // Mark if this position has been used in a match
+                    });
+                }
+                
+                while ((match = regex2.exec(text)) !== null) {
+                    positions.push({
+                        index: match.index,
+                        term: 2,
+                        text: match[0],
+                        used: false
+                    });
+                }
+                
+                // Sort positions by index
+                positions.sort((a, b) => a.index - b.index);
+                
+                // Find valid pairs and their ranges
+                const validRanges = [];
+                
+                // For each term1, find the closest term2 within range
+                for (let i = 0; i < positions.length; i++) {
+                    if (positions[i].used) continue;
+                    
+                    let bestMatch = null;
+                    let bestDistance = Infinity;
+                    let bestJ = -1;
+                    
+                    // Look for the closest matching term in the other direction
+                    for (let j = 0; j < positions.length; j++) {
+                        if (i !== j && !positions[j].used && positions[i].term !== positions[j].term) {
+                            const startPos = Math.min(positions[i].index, positions[j].index);
+                            const endPos = Math.max(positions[i].index, positions[j].index);
+                            const textBetween = text.substring(startPos, endPos);
+                            const wordCount = textBetween.trim().split(/\s+/).length - 1;
+                            
+                            if (wordCount <= maxDistance && wordCount < bestDistance) {
+                                bestDistance = wordCount;
+                                bestMatch = {
+                                    start: startPos,
+                                    end: endPos + positions[j].text.length
+                                };
+                                bestJ = j;
+                            }
+                        }
+                    }
+                    
+                    if (bestMatch) {
+                        validRanges.push(bestMatch);
+                        positions[i].used = true;
+                        positions[bestJ].used = true;
+                    }
+                }
+                
+                if (validRanges.length > 0) {
+                    // Create highlighted fragment
+                    const fragment = document.createDocumentFragment();
+                    let lastIndex = 0;
+                    
+                    // Sort ranges by start position
+                    validRanges.sort((a, b) => a.start - b.start);
+                    
+                    validRanges.forEach(range => {
+                        // Add unhighlighted text before this range
+                        if (range.start > lastIndex) {
+                            fragment.appendChild(
+                                document.createTextNode(text.substring(lastIndex, range.start))
+                            );
+                        }
+                        
+                        // Add highlighted range
+                        const highlightSpan = document.createElement('span');
+                        highlightSpan.textContent = text.substring(range.start, range.end);
+                        highlightSpan.classList.add(config.highlight.highlightClass);
+                        this.highlightSpans.push(highlightSpan);
+                        fragment.appendChild(highlightSpan);
+                        
+                        lastIndex = range.end;
+                        this.matchCount++;
+                    });
+                    
+                    // Add any remaining unhighlighted text
+                    if (lastIndex < text.length) {
+                        fragment.appendChild(
+                            document.createTextNode(text.substring(lastIndex))
+                        );
+                    }
+                    
+                    // Replace original node with new fragment
+                    node.parentNode.replaceChild(fragment, node);
+                }
+            }
+            
+            return this.matchCount;
+        }
         removeHighlights() {
             try {
                 const highlights = document.querySelectorAll(
