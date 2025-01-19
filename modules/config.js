@@ -22,7 +22,12 @@
             proximitySearch: false,
             proximityValue: 5,
             isProximityCharBased: true,
-        }
+        },
+
+        settings: {
+            defaultHighlightColor: "#ffff00",
+            defaultDisplayMode: "popup" // Can be "popup" or "sidebar"
+        },
     };
 
     const tickMarkColor = "rgba(255, 0, 0, 0.5)";

@@ -83,11 +83,101 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
-    function initializeUI() {
-        updateStatus("Extension is ready!");
-        setupEventListeners();
-        setupProximitySearchUI(); 
+// Define setupSettingsPanel outside of initializeUI
+function setupSettingsPanel() {
+    const settingsButton = document.getElementById('settings-button');
+    const settingsPanel = document.getElementById('settings-panel');
+    const closeSettings = document.getElementById('close-settings');
+    const highlightColorPicker = document.getElementById('highlight-color');
+    const restoreDefaultButton = document.getElementById('restore-default-color');
+    const displayModeInputs = document.getElementsByName('display-mode');
+
+    // Load saved settings
+ // Load saved settings
+ chrome.storage.sync.get(['highlightColor', 'displayMode'], (result) => {
+    if (result.highlightColor) {
+        highlightColorPicker.value = result.highlightColor;
     }
+    if (result.displayMode) {
+        const input = Array.from(displayModeInputs)
+            .find(input => input.value === result.displayMode);
+        if (input) input.checked = true;
+        
+        // Apply sidebar mode if that's the saved preference
+        if (result.displayMode === 'sidebar') {
+            document.body.classList.add('sidebar-mode');
+        }
+    }
+});
+
+restoreDefaultButton.addEventListener('click', () => {
+    const defaultColor = config.settings.defaultHighlightColor;
+    highlightColorPicker.value = defaultColor;
+    chrome.storage.sync.set({ highlightColor: defaultColor }, () => {
+        if (activeTabId) {
+            chrome.tabs.sendMessage(activeTabId, {
+                type: "UPDATE_HIGHLIGHT_COLOR",
+                payload: { color: defaultColor }
+            });
+        }
+    });
+});
+
+
+settingsButton.addEventListener('click', () => {
+    settingsPanel.classList.remove('hidden');
+});
+
+closeSettings.addEventListener('click', () => {
+    settingsPanel.classList.add('hidden');
+});
+
+highlightColorPicker.addEventListener('change', (e) => {
+    const newColor = e.target.value;
+    chrome.storage.sync.set({ highlightColor: newColor }, () => {
+        // Update highlight color in current tab
+        if (activeTabId) {
+            chrome.tabs.sendMessage(activeTabId, {
+                type: "UPDATE_HIGHLIGHT_COLOR",
+                payload: { color: newColor }
+            });
+        }
+    });
+});
+
+
+displayModeInputs.forEach(input => {
+    input.addEventListener('change', (e) => {
+        const newMode = e.target.value;
+        chrome.storage.sync.set({ displayMode: newMode }, () => {
+            if (newMode === 'sidebar') {
+                // When switching to sidebar mode, close the popup
+                window.close();
+                // Send message to show sidebar
+                if (activeTabId) {
+                    chrome.tabs.sendMessage(activeTabId, { type: "TOGGLE_SIDEBAR" });
+                }
+            } else {
+                // When switching back to popup mode, cleanup sidebar
+                if (activeTabId) {
+                    chrome.tabs.sendMessage(activeTabId, { type: "CLEANUP_SIDEBAR" });
+                }
+            }
+        });
+    });
+});
+
+}
+
+
+
+
+function initializeUI() {
+    updateStatus("Extension is ready!");
+    setupEventListeners();
+    setupProximitySearchUI(); 
+    setupSettingsPanel(); // Call it here
+}
 
     function setupEventListeners() {
         const searchButton = document.getElementById("searchButton");

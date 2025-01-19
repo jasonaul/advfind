@@ -13,6 +13,27 @@
             this.currentHighlightIndex = -1;
         }
 
+        updateHighlightColor(color) {
+            const style = document.querySelector('#afe-highlight-style');
+            if (style) {
+                style.textContent = `
+                    .${config.highlight.highlightClass} {
+                        background-color: ${color} !important;
+                        color: black !important;
+                        padding: 0.1em !important;
+                        border-radius: 0.2em !important;
+                        box-shadow: 0 0 0 1px ${color} !important;
+                    }
+                    .${config.highlight.currentHighlightClass} {
+                        background-color: lightblue !important;
+                        color: black !important;
+                        box-shadow: 0 0 0 1px lightblue !important;
+                    }
+                `;
+            }
+        }
+        
+
         highlightAndNavigateMatches(searchTerm, options, direction) {
             console.log("Starting highlight and navigation process", { searchTerm, options });
             

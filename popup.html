@@ -6,7 +6,48 @@
 </head>
 <body>
   <div id="container">
+
+    <button id="settings-button" class="icon-button">
+      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+      </svg>
+  </button>
+
+    
     <h1>Advanced Find</h1>
+
+    <div id="settings-panel" class="settings-panel hidden">
+      <div class="settings-header">
+        <h2>Settings</h2>
+        <button id="close-settings" class="icon-button">&times;</button>
+      </div>
+      <div class="settings-content">
+        <div class="setting-item">
+            <label for="highlight-color">Highlight Color:</label>
+            <div class="color-picker-group">
+                <input type="color" id="highlight-color" value="#ffff00"/>
+                <button id="restore-default-color" class="secondary-button">
+                    Restore Default
+                </button>
+            </div>
+        </div>
+        <div class="setting-item">
+            <label>Display Mode:</label>
+            <div class="radio-group">
+                <label class="radio-label">
+                    <input type="radio" name="display-mode" value="popup" checked>
+                    Popup
+                </label>
+                <label class="radio-label">
+                    <input type="radio" name="display-mode" value="sidebar">
+                    Sidebar
+                </label>
+            </div>
+        </div>
+    </div>
+
+    </div>
 
     <input type="text" id="searchTermInput" placeholder="Search term..." />
 

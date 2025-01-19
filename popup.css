@@ -1,65 +1,139 @@
+/* Base Styles */
 body {
-    width: 350px;
-    font-family: sans-serif;
-    padding: 10px;
-  }
-  
-  #container {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-  }
-  
-  input[type="text"] {
-    padding: 8px;
-    border: 1px solid #ccc;
-    border-radius: 4px;
-    font-size: 1em;
-  }
-  
-  button {
-    padding: 8px 12px;
-    background-color: #4CAF50;
-    color: white;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 1em;
-  }
-  
-  button:hover {
-    background-color: #367c39;
-  }
-  
-  button:disabled {
-    background-color: #cccccc;
-    cursor: default;
-  }
-  
-  #options {
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-  }
-  
-  label {
-    font-size: 0.9em;
-  }
-  
-  #matchCount {
-    font-size: 0.9em;
-    color: #333;
-  }
-  
-  #status {
-    font-size: 0.9em;
-    color: red;
-  }
-
-  .afe-highlight.current { 
-    background-color: lightblue !important; 
+  min-width: 350px;
+  font-family: sans-serif;
+  margin: 0;
+  padding: 15px;
+  box-sizing: border-box;
 }
 
+/* Container Layout */
+#container {
+  width: 100%;
+  min-width: 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+  box-sizing: border-box;
+}
+
+/* Form Elements */
+input[type="text"], 
+.search-input {
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 1em;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.number-input {
+  width: 80px;
+  padding: 6px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+
+/* Buttons */
+button {
+  padding: 8px 12px;
+  background-color: #4CAF50;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 1em;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+button:hover {
+  background-color: #367c39;
+}
+
+button:disabled {
+  background-color: #cccccc;
+  cursor: default;
+}
+
+.secondary-button {
+  padding: 6px 12px;
+  background-color: #f0f0f0;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.secondary-button:hover {
+  background-color: #e0e0e0;
+}
+
+.icon-button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 5px;
+  color: #555;
+}
+
+.icon-button:hover {
+  background-color: #f0f0f0;
+  border-radius: 50%;
+}
+
+/* Options and Labels */
+#options {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+label {
+  font-size: 0.9em;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 5px;
+}
+
+.radio-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+/* Status and Indicators */
+#matchCount {
+  font-size: 0.9em;
+  color: #333;
+}
+
+#status {
+  font-size: 0.9em;
+  color: red;
+}
+
+.afe-highlight.current { 
+  background-color: lightblue !important; 
+}
+
+/* Proximity Search Section */
 #proximity-controls {
   margin-top: 10px;
   padding: 8px;
@@ -67,10 +141,13 @@ body {
 }
 
 #proximity-search-container {
+  width: 100%;
+  min-width: 0;
   margin-top: 8px;
   padding: 8px;
   background-color: #f5f5f5;
   border-radius: 4px;
+  box-sizing: border-box;
 }
 
 .input-group {
@@ -84,25 +161,135 @@ body {
   color: #555;
 }
 
-.checkbox-label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
-}
-
-.search-input {
+/* Settings Panel */
+.settings-panel {
+  position: absolute;
+  top: 0;
+  left: 0;
   width: 100%;
-  padding: 6px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  font-size: 0.9em;
+  height: 100%;
+  background: white;
+  z-index: 1000;
+  padding: 20px;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
-.number-input {
-  width: 80px;
-  padding: 6px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  font-size: 0.9em;
+.settings-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.settings-header h2 {
+  margin: 0;
+}
+
+.setting-item {
+  margin-bottom: 15px;
+}
+
+.setting-item label {
+  display: block;
+  margin-bottom: 5px;
+}
+
+#settings-button {
+  position: absolute;
+  right: 10px;
+  top: 10px;
+}
+
+#close-settings {
+  font-size: 24px;
+  line-height: 1;
+}
+
+.color-picker-group {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+/* Sidebar Styles */
+#advanced-find-sidebar-container {
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 100vh;
+  background: white;
+  z-index: 2147483647;
+  border-left: 1px solid #ccc;
+  box-shadow: -2px 0 5px rgba(0, 0, 0, 0.1);
+  display: flex;
+  flex-direction: column;
+  min-width: 250px;
+  width: 350px;
+  overflow: hidden;
+  will-change: width;
+}
+
+
+#advanced-find-sidebar-container:hover {
+  cursor: ew-resize;
+}
+
+#advanced-find-sidebar-container::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: transparent;
+  cursor: ew-resize;
+}
+
+#advanced-find-sidebar-container:hover::before {
+  background: rgba(0, 0, 0, 0.1);
+}
+
+#advanced-find-sidebar {
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: white;
+  flex: 1;
+}
+
+/* Utility Classes */
+.hidden {
+  display: none;
+}
+
+/* Sidebar Mode */
+body.sidebar-mode {
+  width: 100%;
+  height: 100vh;
+  margin: 0;
+  padding: 15px;
+  box-sizing: border-box;
+}
+
+body.sidebar-mode #container {
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+}
+
+body.has-advanced-find-sidebar {
+  margin-right: var(--sidebar-width, 350px) !important;
+  transition: none;
+  width: calc(100% - var(--sidebar-width, 350px)) !important;
+  position: relative;
+}
+
+.sidebar-resize-handle {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.sidebar-resize-handle:hover {
+  opacity: 1;
 }

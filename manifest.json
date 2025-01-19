@@ -12,6 +12,15 @@
     "host_permissions": [
         "<all_urls>"
     ],
+    "web_accessible_resources": [{
+        "resources": [
+            "popup.html",
+            "popup.css",
+            "popup.js",
+            "modules/*"
+        ],
+        "matches": ["<all_urls>"]
+    }],
     "content_scripts": [
         {
             "matches": ["<all_urls>"],
