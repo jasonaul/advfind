@@ -1,0 +1,61 @@
+body {
+    width: 350px;
+    font-family: sans-serif;
+    padding: 10px;
+  }
+  
+  #container {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  
+  input[type="text"] {
+    padding: 8px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-size: 1em;
+  }
+  
+  button {
+    padding: 8px 12px;
+    background-color: #4CAF50;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 1em;
+  }
+  
+  button:hover {
+    background-color: #367c39;
+  }
+  
+  button:disabled {
+    background-color: #cccccc;
+    cursor: default;
+  }
+  
+  #options {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  
+  label {
+    font-size: 0.9em;
+  }
+  
+  #matchCount {
+    font-size: 0.9em;
+    color: #333;
+  }
+  
+  #status {
+    font-size: 0.9em;
+    color: red;
+  }
+
+  .afe-highlight.current { 
+    background-color: lightblue !important; 
+}

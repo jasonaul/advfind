@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Advanced Find</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div id="container">
+    <h1>Advanced Find</h1>
+
+    <input type="text" id="searchTermInput" placeholder="Search term..." />
+
+    <div id="options">
+      <label>
+        <input type="checkbox" id="caseSensitiveCheckbox" />
+        Case Sensitive
+      </label>
+      <label>
+        <input type="checkbox" id="wholeWordsCheckbox" />
+        Whole Words
+      </label>
+      <label>
+        <input type="checkbox" id="regexCheckbox" />
+        Use Regex
+      </label>
+    </div>
+
+    <button id="searchButton">Search</button>
+    <button id="clearButton">Clear</button> 
+
+    <div id="proximity-search-container" style="display: none;">
+        <label for="searchTerm2">Second Search Term:</label>
+        <input type="text" id="searchTerm2" placeholder="Enter second term" />
+  
+        <label for="proximityValue">Proximity:</label>
+        <input type="number" id="proximityValue" min="1" value="5" />
+      </div>
+  
+      <input type="checkbox" id="proximitySearchCheckbox" />
+      <label for="proximitySearchCheckbox">Proximity Search</label>
+
+    <div id="matchCount"></div>
+
+    <div id="status"></div>
+
+    <button id="nextButton">Next Match</button>
+    <button id="prevButton">Previous Match</button>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
