@@ -169,7 +169,19 @@ function initResizableSidebar() {
             window.advancedFindDomUtils.injectHighlightStyle();
             highlightManager = new window.advancedFindHighlightManager();
             setupMessageListeners();
-            
+    
+            // Monitor DOM changes and reapply highlights if necessary
+            const observer = new MutationObserver(() => {
+                if (highlightManager && window.currentSearchTerm) {
+                    console.warn("🔄 Reapplying highlights due to DOM changes...");
+                    setTimeout(() => {
+                        highlightManager.highlightAndNavigateMatches(window.currentSearchTerm, window.currentOptions, "none");
+                    }, 300);
+                }
+            });
+    
+            observer.observe(document.body, { childList: true, subtree: true });
+    
             isContentScriptInjected = true;
             console.log("Advanced Find Extension: Content script initialized successfully");
             chrome.runtime.sendMessage({ type: "CONTENT_SCRIPT_READY" });
@@ -177,7 +189,7 @@ function initResizableSidebar() {
             console.error('Error initializing content script:', error);
         }
     }
-
+    
     // Message handling setup
     function setupMessageListeners() {
         chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
