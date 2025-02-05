@@ -1,3 +1,5 @@
+// /content.js
+
 function injectSidebarStyles() {
     const style = document.createElement('style');
     style.id = 'advanced-find-sidebar-styles';
@@ -8,7 +10,6 @@ function injectSidebarStyles() {
             width: calc(100% - 350px) !important;
             position: relative;
         }
-
         #advanced-find-sidebar-container {
             position: fixed;
             top: 0;
@@ -23,7 +24,6 @@ function injectSidebarStyles() {
             display: flex;
             flex-direction: column;
         }
-        
         #advanced-find-sidebar {
             width: 100%;
             height: 100%;
@@ -38,11 +38,8 @@ function injectSidebarStyles() {
 function initResizableSidebar() {
     const sidebarContainer = document.getElementById('advanced-find-sidebar-container');
     if (!sidebarContainer) return;
-
     let isResizing = false;
     let startX, startWidth;
-
-    // Add resize handle with more precise width
     const resizeHandle = document.createElement('div');
     resizeHandle.className = 'sidebar-resize-handle';
     resizeHandle.style.cssText = `
@@ -56,90 +53,60 @@ function initResizableSidebar() {
         transition: background-color 0.2s ease;
     `;
     sidebarContainer.appendChild(resizeHandle);
-
-    // Hover effects for resize handle
     resizeHandle.addEventListener('mouseenter', () => {
         if (!isResizing) {
             resizeHandle.style.backgroundColor = 'rgba(0, 0, 0, 0.1)';
         }
     });
-
     resizeHandle.addEventListener('mouseleave', () => {
         if (!isResizing) {
             resizeHandle.style.backgroundColor = 'transparent';
         }
     });
-
-    // Mouse down on resize handle
     resizeHandle.addEventListener('mousedown', (e) => {
-        if (e.button !== 0) return; // Only handle left mouse button
-        
+        if (e.button !== 0) return;
         isResizing = true;
-        startX = e.clientX; // Use clientX instead of pageX for more consistent measurements
+        startX = e.clientX;
         startWidth = sidebarContainer.offsetWidth;
-        
         resizeHandle.style.backgroundColor = 'rgba(0, 0, 0, 0.2)';
         document.body.style.cursor = 'ew-resize';
         document.body.style.userSelect = 'none';
-        
-        // Prevent iframe from capturing mouse events during resize
         const iframe = document.getElementById('advanced-find-sidebar');
         if (iframe) {
             iframe.style.pointerEvents = 'none';
         }
-        
         document.addEventListener('mousemove', handleMouseMove);
         document.addEventListener('mouseup', handleMouseUp);
-        
         e.preventDefault();
         e.stopPropagation();
     });
-
     function handleMouseMove(e) {
         if (!isResizing) return;
-
-        // Calculate the difference (reversed from before)
         const diff = e.clientX - startX;
         let newWidth = Math.min(800, Math.max(250, startWidth - diff));
-
         requestAnimationFrame(() => {
-            // Update sidebar width
             sidebarContainer.style.width = `${newWidth}px`;
-            
-            // Update CSS variable for body margin
             document.documentElement.style.setProperty('--sidebar-width', `${newWidth}px`);
         });
-
         e.preventDefault();
     }
-
     function handleMouseUp(e) {
         if (!isResizing) return;
-        
         isResizing = false;
         resizeHandle.style.backgroundColor = 'transparent';
         document.body.style.cursor = '';
         document.body.style.userSelect = '';
-
-        // Re-enable iframe events
         const iframe = document.getElementById('advanced-find-sidebar');
         if (iframe) {
             iframe.style.pointerEvents = '';
         }
-
-        // Remove event listeners
         document.removeEventListener('mousemove', handleMouseMove);
         document.removeEventListener('mouseup', handleMouseUp);
-
-        // Store the final width
         const finalWidth = sidebarContainer.offsetWidth;
         chrome.storage.sync.set({ sidebarWidth: finalWidth });
-
         e.preventDefault();
         e.stopPropagation();
     }
-
-    // Initialize width from storage
     chrome.storage.sync.get(['sidebarWidth'], (result) => {
         if (result.sidebarWidth) {
             const width = result.sidebarWidth;
@@ -147,8 +114,6 @@ function initResizableSidebar() {
             document.documentElement.style.setProperty('--sidebar-width', `${width}px`);
         }
     });
-
-    // Add cleanup function to prevent memory leaks
     return function cleanup() {
         resizeHandle.remove();
         document.removeEventListener('mousemove', handleMouseMove);
@@ -156,32 +121,31 @@ function initResizableSidebar() {
     };
 }
 
-
 (() => {
     let isContentScriptInjected = false;
     let highlightManager = null;
 
-    // Initialize content script
     function initializeContentScript() {
         if (isContentScriptInjected) return;
         
         try {
             window.advancedFindDomUtils.injectHighlightStyle();
-            highlightManager = new window.advancedFindHighlightManager();
+            // Use the globally instantiated HighlightManager from highlight-manager.js
+            highlightManager = window.advancedFindHighlightManagerInstance;
             setupMessageListeners();
-    
-            // Monitor DOM changes and reapply highlights if necessary
-            const observer = new MutationObserver(() => {
+
+            const debouncedReapply = window.advancedFindDomUtils.debounce(() => {
                 if (highlightManager && window.currentSearchTerm) {
-                    console.warn("🔄 Reapplying highlights due to DOM changes...");
+                    console.warn("🔄 Reapplying the highlights due to DOM changes...");
                     setTimeout(() => {
                         highlightManager.highlightAndNavigateMatches(window.currentSearchTerm, window.currentOptions, "none");
                     }, 300);
                 }
-            });
-    
+            }, 300);
+
+            const observer = new MutationObserver(debouncedReapply);
             observer.observe(document.body, { childList: true, subtree: true });
-    
+            
             isContentScriptInjected = true;
             console.log("Advanced Find Extension: Content script initialized successfully");
             chrome.runtime.sendMessage({ type: "CONTENT_SCRIPT_READY" });
@@ -190,7 +154,6 @@ function initResizableSidebar() {
         }
     }
     
-    // Message handling setup
     function setupMessageListeners() {
         chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             if (!highlightManager) {
@@ -214,6 +177,8 @@ function initResizableSidebar() {
     
                 case "CLEAR_HIGHLIGHTS":
                     highlightManager.removeHighlights();
+                    // Also remove tick marks, if any.
+                    removeTickMarks();
                     sendResponse({ success: true });
                     break;
     
@@ -224,49 +189,43 @@ function initResizableSidebar() {
                     sendResponse({ success: true });
                     break;
     
-                    case "TOGGLE_SIDEBAR": {
-                        let sidebarContainer = document.getElementById('advanced-find-sidebar-container');
-                        if (sidebarContainer) {
-                            sidebarContainer.classList.toggle('hidden');
-                            document.body.classList.toggle('sidebar-hidden');
+                // Removed REPLACE_HIGHLIGHTS case.
+    
+                case "TOGGLE_SIDEBAR": {
+                    let sidebarContainer = document.getElementById('advanced-find-sidebar-container');
+                    if (sidebarContainer) {
+                        sidebarContainer.classList.toggle('hidden');
+                        document.body.classList.toggle('sidebar-hidden');
+                        sendResponse({ success: true });
+                    } else {
+                        injectSidebarStyles();
+                        document.body.classList.add('has-advanced-find-sidebar');
+                        sidebarContainer = document.createElement('div');
+                        sidebarContainer.id = 'advanced-find-sidebar-container';
+                        const iframe = document.createElement('iframe');
+                        iframe.id = 'advanced-find-sidebar';
+                        iframe.src = chrome.runtime.getURL('popup.html');
+                        sidebarContainer.appendChild(iframe);
+                        document.body.appendChild(sidebarContainer);
+                        setTimeout(() => {
+                            initResizableSidebar();
                             sendResponse({ success: true });
-                        } else {
-                            // Inject styles first
-                            injectSidebarStyles();
-                            
-                            // Add class to body to trigger margin adjustment
-                            document.body.classList.add('has-advanced-find-sidebar');
-                            
-                            // Create container
-                            sidebarContainer = document.createElement('div');
-                            sidebarContainer.id = 'advanced-find-sidebar-container';
-                            
-                            // Create iframe
-                            const iframe = document.createElement('iframe');
-                            iframe.id = 'advanced-find-sidebar';
-                            iframe.src = chrome.runtime.getURL('popup.html');
-                            
-                            // Add iframe to container
-                            sidebarContainer.appendChild(iframe);
-                            document.body.appendChild(sidebarContainer);
-                            
-                            // Initialize resizable functionality after a short delay to ensure DOM is ready
-                            setTimeout(() => {
-                                initResizableSidebar();
-                                sendResponse({ success: true });
-                            }, 100);
-                            
-                            return true; // Will respond asynchronously
-                        }
-                        break;
+                        }, 100);
+                        return true;
                     }
+                    break;
+                }
     
                 case "CLEANUP_SIDEBAR":
                     cleanupSidebar();
                     sendResponse({ success: true });
                     break;
-            }
     
+                // NEW: Listen for tick mark rendering request
+                case "RENDER_TICK_MARKS":
+                    renderTickMarks();
+                    break;
+            }
             return true;
         });
     }
@@ -301,30 +260,23 @@ function initResizableSidebar() {
             sendResponse({ success: false, error: "Error during text highlighting" });
         }
     }
-
     
-
-    // Check if required modules are loaded
     function checkModules() {
         return window.advancedFindConfig && 
                window.advancedFindDomUtils && 
                window.advancedFindSearchUtils && 
-               window.advancedFindHighlightManager;
+               window.advancedFindHighlightManagerInstance;
     }
 
-    // Initialize if modules are ready
     if (checkModules()) {
         initializeContentScript();
     } else {
-        // Wait for modules to load
         const checkInterval = setInterval(() => {
             if (checkModules()) {
                 clearInterval(checkInterval);
                 initializeContentScript();
             }
         }, 50);
-
-        // Clear interval after 5 seconds if modules haven't loaded
         setTimeout(() => {
             clearInterval(checkInterval);
             if (!isContentScriptInjected) {
@@ -344,6 +296,50 @@ function initResizableSidebar() {
         }
         document.body.classList.remove('has-advanced-find-sidebar', 'sidebar-hidden');
     }
-})();
 
-window.advancedFindDomUtils.debugTextNodes();
+    // --- NEW: Tick Mark Rendering ---
+    function renderTickMarks() {
+        // Remove any existing tick marks container
+        let container = document.getElementById("tick-mark-container");
+        if (container) container.remove();
+        
+        container = document.createElement("div");
+        container.id = "tick-mark-container";
+        container.style.position = "fixed";
+        container.style.top = "0";
+        container.style.right = "0";
+        container.style.width = "10px";
+        container.style.height = "100%";
+        container.style.zIndex = "2147483646"; // just below our sidebar
+        document.body.appendChild(container);
+
+        const docHeight = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
+        // Select all highlighted spans (using the standard highlight class)
+        const highlights = document.querySelectorAll("." + window.advancedFindConfig.config.highlight.highlightClass);
+        highlights.forEach(span => {
+            const rect = span.getBoundingClientRect();
+            // Compute relative position (in percentage)
+            const topPosition = ((rect.top + window.scrollY) / docHeight) * 100;
+            const tick = document.createElement("div");
+            tick.className = "tick-mark";
+            tick.style.position = "absolute";
+            tick.style.left = "0";
+            tick.style.width = "10px";
+            tick.style.height = "5px";
+            tick.style.backgroundColor = "red";
+            tick.style.top = `calc(${topPosition}% - 2.5px)`;
+            tick.style.cursor = "pointer";
+            tick.addEventListener("click", () => {
+                span.scrollIntoView({ behavior: "smooth", block: "center" });
+            });
+            container.appendChild(tick);
+        });
+    }
+
+    function removeTickMarks() {
+        const container = document.getElementById("tick-mark-container");
+        if (container) container.remove();
+    }
+
+    window.advancedFindDomUtils.debugTextNodes();
+})();

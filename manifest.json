@@ -1,8 +1,9 @@
 {
     "manifest_version": 3,
     "name": "Advanced Find Extension",
-    "version": "1.0",
+    "version": "1.104",
     "description": "Advanced text finding and highlighting extension",
+    "author": "Jason Aul",
     "permissions": [
         "activeTab",
         "scripting",
@@ -14,10 +15,11 @@
     ],
     "web_accessible_resources": [{
         "resources": [
-            "popup.html",
-            "popup.css",
-            "popup.js",
-            "modules/*"
+            "modules/config.js",
+            "modules/dom-utils.js",
+            "modules/search-utils.js",
+            "modules/highlight-manager.js",
+            "popup.html", "popup.css", "popup.js"
         ],
         "matches": ["<all_urls>"]
     }],

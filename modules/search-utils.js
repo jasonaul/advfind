@@ -1,12 +1,11 @@
+// /modules/search-utils.js
 (() => {
-    function createSearchRegex(searchTerm, caseSensitive, wholeWords, useRegex) {
+    function createSearchRegex(searchTerm, caseSensitive, wholeWords, useRegex, ignoreDiacritics = false) {
         if (!searchTerm) {
             throw new Error("Search term cannot be empty");
         }
-
         let regexFlags = caseSensitive ? "g" : "gi";
         console.log("Creating regex with flags:", regexFlags);
-
         if (useRegex) {
             try {
                 console.log("Creating regex (regex mode):", searchTerm, regexFlags);
@@ -16,10 +15,10 @@
                 throw new Error("Invalid regular expression");
             }
         } else {
-            // Escape special regex characters in the search term
             const escapedSearchTerm = searchTerm.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
             const wordBoundary = wholeWords ? "\\b" : "";
-            const regexString = `${wordBoundary}${escapedSearchTerm}${wordBoundary}`;
+            let regexString = `${wordBoundary}${escapedSearchTerm}${wordBoundary}`;
+            // (Optional: implement ignoreDiacritics logic here if desired)
             console.log("Creating regex (normal mode):", regexString, regexFlags);
             return new RegExp(regexString, regexFlags);
         }
@@ -29,15 +28,10 @@
         const flags = caseSensitive ? 'g' : 'gi';
         const regex1 = new RegExp(`\\b${term1}\\b`, flags);
         const regex2 = new RegExp(`\\b${term2}\\b`, flags);
-        
-        // Split text into words
         const words = text.split(/\s+/);
         const matches = [];
-        
-        // Find all occurrences of both terms
         for (let i = 0; i < words.length; i++) {
             if (words[i].match(regex1)) {
-                // Look ahead for term2
                 for (let j = i + 1; j <= Math.min(i + maxDistance, words.length - 1); j++) {
                     if (words[j].match(regex2)) {
                         matches.push({
@@ -48,7 +42,6 @@
                     }
                 }
             } else if (words[i].match(regex2)) {
-                // Look ahead for term1
                 for (let j = i + 1; j <= Math.min(i + maxDistance, words.length - 1); j++) {
                     if (words[j].match(regex1)) {
                         matches.push({
@@ -60,7 +53,6 @@
                 }
             }
         }
-        
         return matches;
     }
 

@@ -55,3 +55,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // Important: Don't return true unless you're actually going to call sendResponse asynchronously
     return false;
 });
+
+// *** NEW: Create a context menu item on install ***
+chrome.runtime.onInstalled.addListener(() => {
+    chrome.contextMenus.create({
+        id: "advanced-find-context-menu",
+        title: "Advanced Find on this page",
+        contexts: ["page"]
+    });
+});
+
+// *** NEW: Listen for context menu clicks to toggle sidebar ***
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+    if (info.menuItemId === "advanced-find-context-menu" && tab.id) {
+        chrome.tabs.sendMessage(tab.id, { type: "TOGGLE_SIDEBAR" });
+    }
+});

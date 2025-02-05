@@ -1,3 +1,4 @@
+// /modules/config.js
 (() => {
     const config = {
         highlight: {
@@ -23,10 +24,11 @@
             proximityValue: 5,
             isProximityCharBased: true,
         },
-
         settings: {
             defaultHighlightColor: "#ffff00",
-            defaultDisplayMode: "popup" // Can be "popup" or "sidebar"
+            defaultDisplayMode: "popup", // Can be "popup" or "sidebar"
+            searchHistoryEnabled: true,
+            maxSearchHistory: 10
         },
     };
 

@@ -8,13 +8,13 @@
   <div id="container">
 
     <button id="settings-button" class="icon-button">
+      <!-- (SVG icon as before) -->
       <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <circle cx="12" cy="12" r="3"></circle>
-          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
       </svg>
-  </button>
+    </button>
 
-    
     <h1>Advanced Find</h1>
 
     <div id="settings-panel" class="settings-panel hidden">
@@ -45,67 +45,85 @@
                 </label>
             </div>
         </div>
+      </div>
     </div>
 
-    </div>
-
-    <input type="text" id="searchTermInput" placeholder="Search term..." />
-
-    <div id="options">
-      <label>
-        <input type="checkbox" id="caseSensitiveCheckbox" />
-        Case Sensitive
-      </label>
-      <label>
-        <input type="checkbox" id="wholeWordsCheckbox" />
-        Whole Words
-      </label>
-      <label>
-        <input type="checkbox" id="regexCheckbox" />
-        Use Regex
-      </label>
-    </div>
-
-    <button id="searchButton">Search</button>
-    <button id="clearButton">Clear</button> 
-
-    <div id="proximity-controls">
-      <label class="checkbox-label">
+    <!-- Standard Mode UI -->
+    <div id="standard-mode">
+      <input type="text" id="searchTermInput" placeholder="Search term..." />
+      <!-- NEW: Place the Search and Clear buttons directly below the search input -->
+      <div id="standard-buttons">
+        <button id="searchButton">Search</button>
+        <button id="clearButton">Clear</button>
+      </div>
+      
+      <div id="options">
+        <label>
+          <input type="checkbox" id="caseSensitiveCheckbox" />
+          Case Sensitive
+        </label>
+        <label>
+          <input type="checkbox" id="wholeWordsCheckbox" />
+          Whole Words
+        </label>
+        <!-- The regex checkbox now will trigger a separate UI -->
+        <label>
+          <input type="checkbox" id="regexCheckbox" />
+          Regex Mode
+        </label>
+        <label>
           <input type="checkbox" id="proximitySearchCheckbox" />
           Enable Proximity Search
-      </label>
-  
-      <div id="proximity-search-container" style="display: none;">
-          <div class="input-group">
-              <label for="searchTerm2">Second Search Term:</label>
-              <input 
-                  type="text" 
-                  id="searchTerm2" 
-                  placeholder="Enter second term to search"
-                  class="search-input" 
-              />
-          </div>
-  
-          <div class="input-group">
-              <label for="proximityValue">Maximum Words Between:</label>
-              <input 
-                  type="number" 
-                  id="proximityValue" 
-                  min="1" 
-                  max="50" 
-                  value="10" 
-                  class="number-input"
-              />
-          </div>
+        </label>
       </div>
-  </div>
 
-    <div id="matchCount"></div>
+      <div id="proximity-controls" style="display: none;">
+        <div class="input-group">
+          <label for="searchTerm2">Second Search Term:</label>
+          <input type="text" id="searchTerm2" placeholder="Enter second term to search" class="search-input" />
+        </div>
+        <div class="input-group">
+          <label for="proximityValue">Maximum Words Between:</label>
+          <input type="number" id="proximityValue" min="1" max="50" value="10" class="number-input" />
+        </div>
+      </div>
+      
+      <div id="matchCount"></div>
+      <div id="status"></div>
+      <button id="nextButton">Next Match</button>
+      <button id="prevButton">Previous Match</button>
+    </div>
 
-    <div id="status"></div>
+    <!-- NEW: Regex Mode UI (initially hidden) -->
+    <div id="regex-mode" class="hidden">
+      <button id="returnStandardMode">Return to Standard Mode</button>
+      <input type="text" id="regexSearchInput" placeholder="Enter regex search term..." />
+      <div id="regex-options">
+        <h3>Regex Search Options</h3>
+        <label>
+          <input type="radio" name="regexOption" value="numbers" checked>
+          Numbers (\d+)
+        </label>
+        <label>
+          <input type="radio" name="regexOption" value="emails">
+          Email Addresses
+        </label>
+        <label>
+          <input type="radio" name="regexOption" value="urls">
+          URLs
+        </label>
+        <label>
+          <input type="radio" name="regexOption" value="words">
+          Words (\b\w+\b)
+        </label>
+      </div>
+      <button id="regexSearchButton">Search</button>
+      <button id="regexClearButton">Clear</button>
+    </div>
 
-    <button id="nextButton">Next Match</button>
-    <button id="prevButton">Previous Match</button>
+    <!-- (Optional) A container for tick marks on the scroll bar -->
+    <!-- The tick marks will be appended dynamically to an element with id "tick-mark-container" -->
+    
   </div>
 
   <script src="popup.js"></script>
