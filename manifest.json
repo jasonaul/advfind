@@ -8,7 +8,8 @@
         "activeTab",
         "scripting",
         "storage",
-        "tabs"
+        "tabs",
+        "contextMenus" 
     ],
     "host_permissions": [
         "<all_urls>"
@@ -23,19 +24,20 @@
         ],
         "matches": ["<all_urls>"]
     }],
-    "content_scripts": [
-        {
-            "matches": ["<all_urls>"],
-            "js": [
-                "modules/config.js",
-                "modules/dom-utils.js",
-                "modules/search-utils.js",
-                "modules/highlight-manager.js",
-                "content.js"
-            ],
-            "run_at": "document_end"
-        }
+   "content_scripts": [
+  {
+    "matches": ["<all_urls>"],
+    "js": [
+      "lib/mark.min.js", 
+      "modules/config.js",
+      "modules/dom-utils.js",
+      "modules/search-utils.js",
+      "modules/highlight-manager.js",
+      "content.js"
     ],
+    "run_at": "document_end"
+  }
+],
     "background": {
         "service_worker": "background.js"
     },

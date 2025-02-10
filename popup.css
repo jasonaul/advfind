@@ -1,10 +1,12 @@
 /* Base Styles */
 body {
   min-width: 350px;
-  font-family: sans-serif;
+  font-family: 'Roboto', sans-serif;
   margin: 0;
   padding: 15px;
   box-sizing: border-box;
+  background-color: #f9f9f9;
+  color: #333;
 }
 
 /* Container Layout */
@@ -13,66 +15,65 @@ body {
   min-width: 200px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 10px;
+  gap: 15px;
+  padding: 20px;
   box-sizing: border-box;
+  background-color: #fff;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
 }
 
 /* Form Elements */
-input[type="text"], 
-.search-input {
-  padding: 8px;
+input[type="text"],
+.search-input,
+input[type="number"] {
+  padding: 10px;
   border: 1px solid #ccc;
   border-radius: 4px;
   font-size: 1em;
   width: 100%;
-  min-width: 0;
   box-sizing: border-box;
+  transition: border-color 0.2s;
 }
-
-.number-input {
-  width: 80px;
-  padding: 6px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  font-size: 0.9em;
+input[type="text"]:focus,
+.search-input:focus,
+input[type="number"]:focus {
+  outline: none;
+  border-color: #4CAF50;
 }
 
 /* Buttons */
 button {
-  padding: 8px 12px;
+  padding: 10px 16px;
   background-color: #4CAF50;
-  color: white;
+  color: #fff;
   border: none;
   border-radius: 4px;
   cursor: pointer;
   font-size: 1em;
+  transition: background-color 0.2s;
   width: 100%;
-  min-width: 0;
   box-sizing: border-box;
 }
-
 button:hover {
-  background-color: #367c39;
+  background-color: #45a045;
 }
-
 button:disabled {
   background-color: #cccccc;
   cursor: default;
 }
-
 .secondary-button {
-  padding: 6px 12px;
+  padding: 8px 12px;
   background-color: #f0f0f0;
   border: 1px solid #ccc;
   border-radius: 4px;
   cursor: pointer;
+  color: #333;
+  transition: background-color 0.2s;
 }
-
 .secondary-button:hover {
   background-color: #e0e0e0;
 }
-
 .icon-button {
   background: none;
   border: none;
@@ -80,7 +81,6 @@ button:disabled {
   padding: 5px;
   color: #555;
 }
-
 .icon-button:hover {
   background-color: #f0f0f0;
   border-radius: 50%;
@@ -90,27 +90,25 @@ button:disabled {
 #options {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 8px;
 }
-
 label {
-  font-size: 0.9em;
+  font-size: 0.95em;
 }
-
 .checkbox-label {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   cursor: pointer;
 }
 
+/* Radio Group */
 .radio-group {
   display: flex;
   flex-direction: column;
   gap: 8px;
   margin-top: 5px;
 }
-
 .radio-label {
   display: flex;
   align-items: center;
@@ -119,97 +117,105 @@ label {
 }
 
 /* Status and Indicators */
-#matchCount {
-  font-size: 0.9em;
-  color: #333;
-}
-
+#matchCount,
 #status {
-  font-size: 0.9em;
+  font-size: 0.95em;
+  margin-top: 8px;
+}
+#status {
   color: red;
 }
 
+/* Highlighting (nonintrusive) */
 .afe-highlight.current { 
   background-color: lightblue !important; 
 }
 
+.afe-highlight { 
+  background-color: yellow !important; 
+}
+
+.afe-highlight-proximity { 
+  background-color: lightgreen !important; 
+}
+
+.afe-highlight-secondary { 
+  background-color: red !important; 
+}
+
+
 /* Proximity Search Section */
 #proximity-controls {
   margin-top: 10px;
-  padding: 8px;
+  padding: 10px;
   border-top: 1px solid #eee;
-}
-
-#proximity-search-container {
-  width: 100%;
-  min-width: 0;
-  margin-top: 8px;
-  padding: 8px;
-  background-color: #f5f5f5;
+  background-color: #f7f7f7;
   border-radius: 4px;
-  box-sizing: border-box;
 }
 
+/* Input Group */
 .input-group {
-  margin: 8px 0;
+  margin: 10px 0;
 }
-
 .input-group label {
   display: block;
-  margin-bottom: 4px;
-  font-size: 0.9em;
+  margin-bottom: 5px;
+  font-size: 0.95em;
   color: #555;
 }
 
 /* Settings Panel */
 .settings-panel {
-  position: absolute;
+  position: fixed;
   top: 0;
   left: 0;
   width: 100%;
   height: 100%;
-  background: white;
+  background: rgba(255,255,255,0.95);
   z-index: 1000;
   padding: 20px;
-  min-width: 0;
   box-sizing: border-box;
+  overflow-y: auto;
 }
-
 .settings-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 20px;
 }
-
 .settings-header h2 {
   margin: 0;
+  font-size: 1.5em;
 }
-
 .setting-item {
-  margin-bottom: 15px;
+  margin-bottom: 20px;
 }
-
 .setting-item label {
   display: block;
-  margin-bottom: 5px;
+  margin-bottom: 8px;
+  font-weight: 500;
 }
-
-#settings-button {
-  position: absolute;
-  right: 10px;
-  top: 10px;
-}
-
-#close-settings {
-  font-size: 24px;
-  line-height: 1;
-}
-
 .color-picker-group {
   display: flex;
   gap: 10px;
   align-items: center;
+}
+
+/* Position Settings Button */
+#settings-button {
+  position: fixed;
+  right: 15px;
+  top: 15px;
+  z-index: 1100;
+}
+
+/* Close Settings Button */
+#close-settings {
+  font-size: 24px;
+  line-height: 1;
+  background: none;
+  border: none;
+  cursor: pointer;
 }
 
 /* Sidebar Styles */
@@ -218,23 +224,19 @@ label {
   top: 0;
   right: 0;
   height: 100vh;
-  background: white;
+  background: #fff;
   z-index: 2147483647;
   border-left: 1px solid #ccc;
-  box-shadow: -2px 0 5px rgba(0, 0, 0, 0.1);
+  box-shadow: -2px 0 5px rgba(0,0,0,0.1);
   display: flex;
   flex-direction: column;
   min-width: 250px;
   width: 350px;
   overflow: hidden;
-  will-change: width;
 }
-
-
 #advanced-find-sidebar-container:hover {
   cursor: ew-resize;
 }
-
 #advanced-find-sidebar-container::before {
   content: "";
   position: absolute;
@@ -245,22 +247,20 @@ label {
   background: transparent;
   cursor: ew-resize;
 }
-
 #advanced-find-sidebar-container:hover::before {
   background: rgba(0, 0, 0, 0.1);
 }
-
 #advanced-find-sidebar {
   width: 100%;
   height: 100%;
   border: none;
-  background: white;
+  background: #fff;
   flex: 1;
 }
 
 /* Utility Classes */
 .hidden {
-  display: none;
+  display: none !important;
 }
 
 /* Sidebar Mode */
@@ -271,37 +271,33 @@ body.sidebar-mode {
   padding: 15px;
   box-sizing: border-box;
 }
-
 body.sidebar-mode #container {
   width: 100%;
   height: 100%;
   overflow-y: auto;
 }
-
 body.has-advanced-find-sidebar {
   margin-right: var(--sidebar-width, 350px) !important;
   transition: none;
   width: calc(100% - var(--sidebar-width, 350px)) !important;
   position: relative;
 }
-
 .sidebar-resize-handle {
   opacity: 0;
   transition: opacity 0.2s ease;
 }
-
 .sidebar-resize-handle:hover {
   opacity: 1;
 }
 
-/* NEW: Replace Section Styles */
+/* Replace Section Styles */
 #replace-section {
   display: flex;
   gap: 10px;
   margin-top: 10px;
 }
 
-/* NEW: Search History Section Styles */
+/* Search History Section Styles */
 #search-history-section {
   margin-top: 10px;
   border-top: 1px solid #ccc;
@@ -316,4 +312,47 @@ body.has-advanced-find-sidebar {
   cursor: pointer;
   padding: 4px;
   border-bottom: 1px solid #eee;
+}
+
+/* Regex Mode Specific Styles */
+.regex-input-group {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+/* Modal Styles for Regex Help */
+.modal {
+  position: fixed;
+  z-index: 1100;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  background-color: rgba(0,0,0,0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+.modal-content {
+  background-color: #fff;
+  border-radius: 8px;
+  padding: 20px;
+  width: 90%;
+  max-width: 500px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+  position: relative;
+}
+.modal .close {
+  position: absolute;
+  right: 15px;
+  top: 10px;
+  font-size: 24px;
+  cursor: pointer;
+  color: #999;
+}
+.modal .close:hover {
+  color: #666;
 }

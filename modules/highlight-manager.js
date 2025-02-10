@@ -1,322 +1,249 @@
-// /modules/highlight-manager.js
 (() => {
-    if (!window.advancedFindConfig || !window.advancedFindConfig.config) {
-        console.error('Config not loaded');
-        return;
-    }
-
-    const config = window.advancedFindConfig.config;
-
+    if (window.HighlightManager) return;
+  
     class HighlightManager {
         constructor() {
-            this.highlightSpans = [];
-            this.matchCount = 0;
-            this.currentHighlightIndex = -1;
-            this.processedNodes = new Set();
-            this.debug = true;
+            this.markInstance = new Mark(document.body);
+            this.textNodeCache = [];
+        }
+    
+        initialize() {
+            this.buildTextNodeCache();
         }
 
-        updateHighlightColor(color) {
-            const style = document.querySelector('#afe-highlight-style');
-            if (style) {
-                style.textContent = `
-                    .${config.highlight.highlightClass} {
-                        background-color: ${color} !important;
-                        color: black !important;
-                        padding: 0.1em !important;
-                        border-radius: 0.2em !important;
-                        box-shadow: 0 0 0 1px ${color} !important;
-                    }
-                    .${config.highlight.currentHighlightClass} {
-                        background-color: lightblue !important;
-                        color: black !important;
-                        box-shadow: 0 0 0 1px lightblue !important;
-                    }
-                `;
-            }
-        }
-
-        highlightAndNavigateMatches(searchTerm, options, direction) {
-            console.log("🔍 Starting search for:", searchTerm);
-            this.removeHighlights();
-
-            try {
-                let count = 0;
-                let matches = 0;
-                let nodesWithMatches = [];
-
-                const regex = window.advancedFindSearchUtils.createSearchRegex(
-                    searchTerm, 
-                    options.caseSensitive, 
-                    options.wholeWords, 
-                    options.useRegex
-                );
-
-                let allNodesWalker = document.createTreeWalker(
-                    document.documentElement,
-                    NodeFilter.SHOW_TEXT,
-                    {
-                        acceptNode: (node) => {
-                            if (this.shouldAcceptNode(node)) {
-                                count++;
-                                return NodeFilter.FILTER_ACCEPT;
-                            }
-                            return NodeFilter.FILTER_SKIP;
-                        }
-                    }
-                );
-
-                let node;
-                while ((node = allNodesWalker.nextNode())) {
-                    const text = node.textContent.trim();
-                    console.log(`Processing node: "${text.slice(0, 30)}..."`);
-                    if (regex.test(text)) {
-                        nodesWithMatches.push({
-                            content: text,
-                            path: this.getNodePath(node),
-                            visible: this.isNodeVisible(node)
+        buildTextNodeCache() {
+            // Reset the cache and global offset.
+            this.textNodeCache = [];
+            let position = 0;
+        
+            // Recursive function to traverse all nodes, including shadow roots.
+            function traverse(node) {
+                if (node.nodeType === Node.TEXT_NODE) {
+                    let text = node.textContent;
+                    if (text.trim()) {
+                        this.textNodeCache.push({
+                            node: node,
+                            text: text,
+                            start: position,
+                            end: position + text.length
                         });
-                        this.processTextNode(node, regex);
-                        matches++;
+                        position += text.length;
+                    }
+                } else if (node.nodeType === Node.ELEMENT_NODE) {
+                    // Skip elements that are known not to contain visible text.
+                    const tag = node.tagName;
+                    if (['SCRIPT', 'STYLE', 'NOSCRIPT', 'IFRAME', 'OBJECT', 'EMBED'].includes(tag)) {
+                        return;
+                    }
+                    // If the element has a shadow root, traverse it.
+                    if (node.shadowRoot) {
+                        traverse.call(this, node.shadowRoot);
+                    }
+                    // Traverse each child node.
+                    for (let child of node.childNodes) {
+                        traverse.call(this, child);
+                    }
+                } else if (node.nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
+                    for (let child of node.childNodes) {
+                        traverse.call(this, child);
                     }
                 }
-
-                console.log(`📊 Search Analysis:
-                    Search term: "${searchTerm}"
-                    Total nodes scanned: ${count}
-                    Potential matches found: ${nodesWithMatches.length}
-                `);
-
-                if (nodesWithMatches.length > 0) {
-                    console.log('🔍 Nodes containing matches:', nodesWithMatches);
-                }
-                console.log(`✅ Total nodes processed: ${count}`);
-                console.log(`🎯 Total matches highlighted: ${this.matchCount}`);
-                console.log(`🖍 Highlight spans created: ${this.highlightSpans.length}`);
-
-                if (direction !== "none" && this.matchCount > 0) {
-                    this.navigateMatches(direction);
-                }
-                return this.matchCount;
-            } catch (error) {
-                console.error("❌ Error during highlighting:", error);
-                return 0;
             }
+            traverse.call(this, document.documentElement);
         }
+        
 
-        // NEW: Implement proximity search highlighting
-        highlightProximityMatches(searchTerm, searchTerm2, proximityValue, caseSensitive) {
-            console.log("🔍 Starting proximity search for:", searchTerm, "and", searchTerm2);
-            this.removeHighlights();
-
-            const flags = caseSensitive ? "g" : "gi";
-            const escapeRegex = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            const term1 = escapeRegex(searchTerm);
-            const term2 = escapeRegex(searchTerm2);
-            // Build a regex that matches term1 then up to N words then term2 OR vice versa.
-            const pattern = `\\b(${term1})(?:\\W+\\w+){0,${proximityValue}}\\W+(${term2})\\b|\\b(${term2})(?:\\W+\\w+){0,${proximityValue}}\\W+(${term1})\\b`;
-            let regex;
-            try {
-                regex = new RegExp(pattern, flags);
-            } catch (e) {
-                console.error("Invalid regex for proximity search:", e);
-                return 0;
+        highlight(searchText, options = {}) {
+            if (!this.markInstance) {
+                console.error("HighlightManager not initialized.");
+                return;
             }
+    
+            this.markInstance.unmark({
+                done: () => {
+                    if (options.proximitySearch && options.searchTerm2) {
+                        this.highlightProximity(searchText, options.searchTerm2, options.proximityValue, options);
+                    } else {
+                        try {
+                            const regex = window.advancedFindSearchUtils.createSearchRegex(
+                                searchText,
+                                options.caseSensitive,
+                                options.wholeWords,
+                                options.useRegex
+                            );
+// Determine whether we are on a complex page like Reddit
+let disableAcrossElements = window.location.href.indexOf("reddit.com") !== -1;
 
-            let count = 0;
-            let matches = 0;
-            let nodesWithMatches = [];
-            let allNodesWalker = document.createTreeWalker(
-                document.documentElement,
-                NodeFilter.SHOW_TEXT,
-                {
-                    acceptNode: (node) => {
-                        if (this.shouldAcceptNode(node)) {
-                            count++;
-                            return NodeFilter.FILTER_ACCEPT;
+this.markInstance.markRegExp(regex, {
+    className: window.advancedFindConfig.config.highlight.highlightClass,
+    acrossElements: true,
+    ...options,
+    done: (count) => {
+        console.log(`Highlighted ${count} occurrences of "${searchText}"`);
+    }
+});
+
+
+                        } catch (error) {
+                            console.error("Error highlighting with regex:", error);
                         }
-                        return NodeFilter.FILTER_SKIP;
                     }
                 }
-            );
+            });
+        }
 
-            let node;
-            while ((node = allNodesWalker.nextNode())) {
-                const text = node.textContent.trim();
-                if (regex.test(text)) {
-                    nodesWithMatches.push({
-                        content: text,
-                        path: this.getNodePath(node),
-                        visible: this.isNodeVisible(node)
+        highlightProximity(term1, term2, maxDistance, options, callback) {
+            // First, remove any existing highlights.
+            this.markInstance.unmark({
+                done: () => {
+                    // Helper to escape regex special characters.
+                    function escapeRegex(str) {
+                        return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                    }
+        
+                    // If wholeWords is desired, add word-boundary markers.
+                    let escapedTerm1 = options.wholeWords ? "\\b" + escapeRegex(term1) + "\\b" : escapeRegex(term1);
+                    let escapedTerm2 = options.wholeWords ? "\\b" + escapeRegex(term2) + "\\b" : escapeRegex(term2);
+        
+                    // Build a pattern that allows up to maxDistance words between the two terms.
+                    // The pattern (?:\W+\w+){0,maxDistance}\W* means: 
+                    // "0 to maxDistance occurrences of (some non-word characters then a word)"
+                    let intervening = `(?:\\W+\\w+){0,${maxDistance}}\\W*`;
+        
+                    // Build two possible orders: term1 followed by term2, or term2 followed by term1.
+                    let pattern1 = escapedTerm1 + intervening + escapedTerm2;
+                    let pattern2 = escapedTerm2 + intervening + escapedTerm1;
+        
+                    // Combine the two with alternation.
+                    let combinedPattern = "(" + pattern1 + ")|(" + pattern2 + ")";
+                    
+                    // Set regex flags: global and optionally case-insensitive.
+                    let flags = options.caseSensitive ? "g" : "gi";
+        
+                    try {
+                        let combinedRegex = new RegExp(combinedPattern, flags);
+                        console.log("Using proximity regex:", combinedRegex);
+                        
+                        // Use mark.js to highlight all matches of the combined regex.
+                        this.markInstance.markRegExp(combinedRegex, {
+                            className: window.advancedFindConfig.config.highlight.proximityHighlightClass,
+                            acrossElements: true,
+                            separateWordSearch: false,
+                            done: (count) => {
+                                console.log(`Found ${count} proximity matches`);
+                                if (callback) callback(count);
+                            }
+                        });
+                    } catch (e) {
+                        console.error("Error creating proximity regex:", e);
+                        if (callback) callback(0);
+                    }
+                }
+            });
+        }
+        
+        
+        
+
+        findAllMatches(regex) {
+            let matches = [];
+            for (let nodeInfo of this.textNodeCache) {
+                let match;
+                while ((match = regex.exec(nodeInfo.text)) !== null) {
+                    matches.push({
+                        start: nodeInfo.start + match.index,
+                        end: nodeInfo.start + match.index + match[0].length,
+                        text: match[0]
                     });
-                    this.processTextNode(node, regex);
-                    matches++;
                 }
             }
-            console.log(`Proximity search: found ${matches} matches in ${count} nodes.`);
-            return this.matchCount;
+            return matches;
         }
 
-        isNodeVisible(node) {
-            let element = node.parentElement;
-            while (element) {
-                const style = window.getComputedStyle(element);
-                if (style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity) === 0) {
-                    return false;
+        countWordsBetween(start, end) {
+            // Get the text between these positions from our cache
+            let text = '';
+            for (let nodeInfo of this.textNodeCache) {
+                if (nodeInfo.end < start) continue;
+                if (nodeInfo.start > end) break;
+                
+                let nodeText = nodeInfo.text;
+                if (nodeInfo.start < start) {
+                    nodeText = nodeText.slice(start - nodeInfo.start);
                 }
-                element = element.parentElement;
+                if (nodeInfo.end > end) {
+                    nodeText = nodeText.slice(0, end - nodeInfo.start);
+                }
+                text += nodeText + ' ';
             }
-            return true;
+            
+            // Count words using a simple split on whitespace
+            return text.trim().split(/\s+/).length - 1;
         }
 
-        shouldAcceptNode(node) {
-            if (!node || !node.textContent.trim()) return false;
-            const parent = node.parentElement;
-            if (!parent) return false;
-            if (parent.classList.contains(config.highlight.highlightClass) ||
-                parent.classList.contains(config.highlight.currentHighlightClass)) {
-                return false;
-            }
-            const style = window.getComputedStyle(parent);
-            if (style.display === 'none' || parseFloat(style.opacity) === 0) {
-                console.warn("⚠️ Loosening visibility rejection:", node.textContent.slice(0, 30));
-                return true;
-            }
-            return true;
-        }
-
-        getNodeRejectionReason(node) {
-            if (!node) return "Node is null";
-            if (!node.textContent.trim()) return "Empty text";
-            if (!node.parentElement) return "No parent element";
-            const parent = node.parentElement;
-            if (parent.classList.contains(config.highlight.highlightClass) ||
-                parent.classList.contains(config.highlight.currentHighlightClass)) {
-                return "Already highlighted";
-            }
-            if (!this.isNodeVisible(node)) return "Node is not visible";
-            return "Node accepted";
-        }
-
-        getNodePath(node) {
-            const path = [];
-            let current = node.parentElement;
-            while (current && current !== document.documentElement) {
-                let identifier = current.tagName.toLowerCase();
-                if (current.id) identifier += `#${current.id}`;
-                path.unshift(identifier);
-                current = current.parentElement;
-            }
-            return path.join(' > ');
-        }
-
-        // UPDATED: Use requestAnimationFrame and store original text when replacing text nodes.
-        processTextNode(node, regex) {
-            if (!node || !node.textContent || !node.parentNode) return;
-
-            const originalText = node.textContent;
-            let lastIndex = 0;
-            let matches = 0;
-            const fragment = document.createDocumentFragment();
-            regex.lastIndex = 0;
-            let match;
-            while ((match = regex.exec(originalText)) !== null) {
-                if (match.index > lastIndex) {
-                    fragment.appendChild(
-                        document.createTextNode(originalText.slice(lastIndex, match.index))
+        mergeOverlappingRanges(ranges) {
+            if (ranges.length <= 1) return ranges;
+            
+            ranges.sort((a, b) => a.start - b.start);
+            
+            let merged = [ranges[0]];
+            
+            for (let i = 1; i < ranges.length; i++) {
+                let current = ranges[i];
+                let previous = merged[merged.length - 1];
+                
+                if (current.start <= previous.start + previous.length) {
+                    previous.length = Math.max(
+                        previous.length,
+                        current.start - previous.start + current.length
                     );
+                } else {
+                    merged.push(current);
                 }
-                const highlightSpan = document.createElement('span');
-                highlightSpan.textContent = match[0];
-                highlightSpan.classList.add(config.highlight.highlightClass);
-                // Store original text (if needed for future revert)
-                highlightSpan.dataset.originalText = originalText;
-                highlightSpan.dataset.matchIndex = matches;
-                this.highlightSpans.push(highlightSpan);
-                fragment.appendChild(highlightSpan);
-                lastIndex = regex.lastIndex;
-                matches++;
             }
-            if (lastIndex < originalText.length) {
-                fragment.appendChild(
-                    document.createTextNode(originalText.slice(lastIndex))
-                );
-            }
-            if (matches > 0) {
-                requestAnimationFrame(() => {
-                    if (node.parentNode) {
-                        node.parentNode.replaceChild(fragment, node);
-                        this.matchCount += matches;
-                        console.log("✅ Highlight successfully applied.");
-                    }
-                });
-            } else {
-                console.warn(`⚠️ Match found but highlight failed for: "${originalText.slice(0, 30)}..."`);
-            }
+            
+            return merged;
         }
 
-        navigateMatches(direction) {
-            if (this.matchCount === 0 || !this.highlightSpans.length) return;
-            try {
-                const previousHighlight = document.querySelector(
-                    `.${config.highlight.currentHighlightClass}`
-                );
-                if (previousHighlight) {
-                    previousHighlight.classList.remove(config.highlight.currentHighlightClass);
-                }
-                switch (direction) {
-                    case "next":
-                        this.currentHighlightIndex = 
-                            this.currentHighlightIndex === -1 ? 0 : 
-                            (this.currentHighlightIndex + 1) % this.matchCount;
-                        break;
-                    case "previous":
-                        this.currentHighlightIndex = 
-                            this.currentHighlightIndex === -1 ? this.matchCount - 1 : 
-                            (this.currentHighlightIndex - 1 + this.matchCount) % this.matchCount;
-                        break;
-                }
-                const currentMatchSpan = this.highlightSpans[this.currentHighlightIndex];
-                if (currentMatchSpan) {
-                    currentMatchSpan.classList.add(config.highlight.currentHighlightClass);
-                    currentMatchSpan.scrollIntoView({
-                        behavior: "smooth",
-                        block: "center",
-                        inline: "nearest"
-                    });
-                }
-            } catch (error) {
-                console.error('Error during navigation:', error);
+        clearHighlights() {
+            if (!this.markInstance) {
+                console.error("HighlightManager not initialized.");
+                return;
             }
+            this.markInstance.unmark();
         }
 
-        removeHighlights() {
-            try {
-                const highlights = document.querySelectorAll(
-                    `.${config.highlight.highlightClass}, 
-                     .${config.highlight.currentHighlightClass}`
-                );
-                highlights.forEach(highlight => {
-                    const parent = highlight.parentNode;
-                    if (parent) {
-                        parent.replaceChild(
-                            document.createTextNode(highlight.textContent || ''),
-                            highlight
-                        );
-                        parent.normalize();
-                    }
-                });
-                this.highlightSpans = [];
-                this.matchCount = 0;
-                this.currentHighlightIndex = -1;
-                this.processedNodes.clear();
-                console.log("Removed all highlights and reset state");
-            } catch (error) {
-                console.error('Error removing highlights:', error);
+        navigate(direction) {
+            const highlights = document.querySelectorAll(
+                `.${window.advancedFindConfig.config.highlight.highlightClass}, ` +
+                `.${window.advancedFindConfig.config.highlight.proximityHighlightClass}`
+            );
+            if (!highlights.length) return;
+    
+            let currentIndex = -1;
+            highlights.forEach((el, i) => {
+                if (el.classList.contains(window.advancedFindConfig.config.highlight.currentHighlightClass)) {
+                    currentIndex = i;
+                }
+            });
+    
+            if (direction === "next") {
+                currentIndex = (currentIndex + 1) % highlights.length;
+            } else if (direction === "previous") {
+                currentIndex = (currentIndex - 1 + highlights.length) % highlights.length;
             }
+    
+            highlights.forEach(el => 
+                el.classList.remove(window.advancedFindConfig.config.highlight.currentHighlightClass)
+            );
+    
+            const target = highlights[currentIndex];
+            target.classList.add(window.advancedFindConfig.config.highlight.currentHighlightClass);
+            target.scrollIntoView({ behavior: "smooth", block: "center" });
         }
     }
-
-    // For tick mark rendering later, assign the instance globally.
-    window.advancedFindHighlightManagerInstance = new HighlightManager();
+    
+    window.HighlightManager = HighlightManager;
+    window.highlightManager = new HighlightManager();
+    window.highlightManager.initialize();
 })();

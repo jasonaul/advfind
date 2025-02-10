@@ -1,18 +1,20 @@
+// background.js
+
 // Keep track of injected tabs
 const injectedTabs = new Set();
 
 // Listen for tab updates
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-    if (changeInfo.status === 'complete' && tab.url && 
-        !tab.url.startsWith('chrome://') && 
+    if (changeInfo.status === 'complete' && tab.url &&
+        !tab.url.startsWith('chrome://') &&
         !injectedTabs.has(tabId)) {
-        
+
         // Inject scripts one by one in sequence
         injectScriptsSequentially(tabId)
             .then(() => {
                 console.log('All scripts injected successfully');
                 injectedTabs.add(tabId);
-                return chrome.tabs.sendMessage(tabId, { type: "INITIALIZE_CONTENT_SCRIPT" });
+                // No need to send INITIALIZE_CONTENT_SCRIPT, it initializes itself
             })
             .catch(err => console.error('Failed to inject scripts:', err));
     }
@@ -20,6 +22,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 
 async function injectScriptsSequentially(tabId) {
     const scripts = [
+        'lib/mark.min.js', // Include mark.js here
         'modules/config.js',
         'modules/dom-utils.js',
         'modules/search-utils.js',
@@ -36,7 +39,7 @@ async function injectScriptsSequentially(tabId) {
             console.log(`Injected ${script} successfully`);
         } catch (error) {
             console.error(`Failed to inject ${script}:`, error);
-            throw error;
+            throw error; // Important: Re-throw the error to stop the chain.
         }
     }
 }
@@ -46,17 +49,17 @@ chrome.tabs.onRemoved.addListener((tabId) => {
     injectedTabs.delete(tabId);
 });
 
-// Handle messages with proper async response
+// Handle messages (simplified - only for content script readiness)
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === "CONTENT_SCRIPT_READY") {
         console.log("Content script ready in tab:", sender.tab?.id);
         sendResponse({ received: true });
     }
-    // Important: Don't return true unless you're actually going to call sendResponse asynchronously
+    // Return false here. We're not sending any asynchronous responses *from background.js*.
     return false;
 });
 
-// *** NEW: Create a context menu item on install ***
+// Create a context menu item on install
 chrome.runtime.onInstalled.addListener(() => {
     chrome.contextMenus.create({
         id: "advanced-find-context-menu",
@@ -65,7 +68,7 @@ chrome.runtime.onInstalled.addListener(() => {
     });
 });
 
-// *** NEW: Listen for context menu clicks to toggle sidebar ***
+// Listen for context menu clicks to toggle sidebar
 chrome.contextMenus.onClicked.addListener((info, tab) => {
     if (info.menuItemId === "advanced-find-context-menu" && tab.id) {
         chrome.tabs.sendMessage(tab.id, { type: "TOGGLE_SIDEBAR" });
