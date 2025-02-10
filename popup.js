@@ -328,9 +328,10 @@ document.addEventListener("DOMContentLoaded", () => {
     function setupProximitySearchUI() {
         const proximitySearchCheckbox = document.getElementById("proximitySearchCheckbox");
         const proximitySearchContainer = document.getElementById("proximity-controls");
+        
         if (proximitySearchCheckbox && proximitySearchContainer) {
             proximitySearchCheckbox.addEventListener("change", (event) => {
-                proximitySearchContainer.style.display = event.target.checked ? "block" : "none";
+                proximitySearchContainer.classList.toggle("hidden", !event.target.checked);
             });
         }
     }

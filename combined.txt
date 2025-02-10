@@ -1685,7 +1685,7 @@ function(){function n(e){t(this,n),this.ctx=e,this.ie=!1;var r=window.navigator.
 
     window.advancedFindConfig = { config, tickMarkColor };
 })();
-..
+.
 ===== C:\Users\jason\OneDrive\Desktop\Coding\advfindv\modules\dom-utils.js ===== 
 // /modules/dom-utils.js
 (() => {
@@ -1891,7 +1891,7 @@ function(){function n(e){t(this,n),this.ctx=e,this.ie=!1;var r=window.navigator.
         debounce  // expose debounce for use in other modules
     };
 })();
-..
+.
 ===== C:\Users\jason\OneDrive\Desktop\Coding\advfindv\modules\highlight-manager.js ===== 
 (() => {
     if (window.HighlightManager) return;
@@ -1907,24 +1907,46 @@ function(){function n(e){t(this,n),this.ctx=e,this.ie=!1;var r=window.navigator.
         }
 
         buildTextNodeCache() {
+            // Reset the cache and global offset.
             this.textNodeCache = [];
-            const walker = window.advancedFindDomUtils.createTextWalker();
-            let node;
             let position = 0;
-            
-            while ((node = walker.nextNode())) {
-                const text = node.textContent;
-                if (text.trim()) {
-                    this.textNodeCache.push({
-                        node,
-                        text,
-                        start: position,
-                        end: position + text.length
-                    });
-                    position += text.length;
+        
+            // Recursive function to traverse all nodes, including shadow roots.
+            function traverse(node) {
+                if (node.nodeType === Node.TEXT_NODE) {
+                    let text = node.textContent;
+                    if (text.trim()) {
+                        this.textNodeCache.push({
+                            node: node,
+                            text: text,
+                            start: position,
+                            end: position + text.length
+                        });
+                        position += text.length;
+                    }
+                } else if (node.nodeType === Node.ELEMENT_NODE) {
+                    // Skip elements that are known not to contain visible text.
+                    const tag = node.tagName;
+                    if (['SCRIPT', 'STYLE', 'NOSCRIPT', 'IFRAME', 'OBJECT', 'EMBED'].includes(tag)) {
+                        return;
+                    }
+                    // If the element has a shadow root, traverse it.
+                    if (node.shadowRoot) {
+                        traverse.call(this, node.shadowRoot);
+                    }
+                    // Traverse each child node.
+                    for (let child of node.childNodes) {
+                        traverse.call(this, child);
+                    }
+                } else if (node.nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
+                    for (let child of node.childNodes) {
+                        traverse.call(this, child);
+                    }
                 }
             }
+            traverse.call(this, document.documentElement);
         }
+        
 
         highlight(searchText, options = {}) {
             if (!this.markInstance) {
@@ -1944,14 +1966,19 @@ function(){function n(e){t(this,n),this.ctx=e,this.ie=!1;var r=window.navigator.
                                 options.wholeWords,
                                 options.useRegex
                             );
-                            this.markInstance.markRegExp(regex, {
-                                className: window.advancedFindConfig.config.highlight.highlightClass,
-                                acrossElements: true,
-                                ...options,
-                                done: (count) => {
-                                    console.log(`Highlighted ${count} occurrences of "${searchText}"`);
-                                }
-                            });
+// Determine whether we are on a complex page like Reddit
+let disableAcrossElements = window.location.href.indexOf("reddit.com") !== -1;
+
+this.markInstance.markRegExp(regex, {
+    className: window.advancedFindConfig.config.highlight.highlightClass,
+    acrossElements: true,
+    ...options,
+    done: (count) => {
+        console.log(`Highlighted ${count} occurrences of "${searchText}"`);
+    }
+});
+
+
                         } catch (error) {
                             console.error("Error highlighting with regex:", error);
                         }
@@ -1961,64 +1988,57 @@ function(){function n(e){t(this,n),this.ctx=e,this.ie=!1;var r=window.navigator.
         }
 
         highlightProximity(term1, term2, maxDistance, options, callback) {
-            // Refresh the text node cache
-            this.buildTextNodeCache();
-            
-            // Clear previous highlights
+            // First, remove any existing highlights.
             this.markInstance.unmark({
                 done: () => {
-                    const regex1 = window.advancedFindSearchUtils.createSearchRegex(
-                        term1, 
-                        options.caseSensitive, 
-                        options.wholeWords, 
-                        false
-                    );
-                    const regex2 = window.advancedFindSearchUtils.createSearchRegex(
-                        term2, 
-                        options.caseSensitive, 
-                        options.wholeWords, 
-                        false
-                    );
-
-                    let proximityMatches = [];
-                    
-                    // Find all matches for both terms with their positions
-                    let matches1 = this.findAllMatches(regex1);
-                    let matches2 = this.findAllMatches(regex2);
-
-                    // Find pairs within the specified word distance
-                    for (let match1 of matches1) {
-                        for (let match2 of matches2) {
-                            let wordCount = this.countWordsBetween(
-                                Math.min(match1.end, match2.end),
-                                Math.max(match1.start, match2.start)
-                            );
-
-                            if (wordCount <= maxDistance) {
-                                proximityMatches.push({
-                                    start: Math.min(match1.start, match2.start),
-                                    length: Math.max(match1.end, match2.end) - Math.min(match1.start, match2.start)
-                                });
-                            }
-                        }
+                    // Helper to escape regex special characters.
+                    function escapeRegex(str) {
+                        return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
                     }
-
-                    // Merge overlapping ranges
-                    proximityMatches = this.mergeOverlappingRanges(proximityMatches);
-
-                    // Highlight the matches
-                    this.markInstance.markRanges(proximityMatches, {
-                        className: window.advancedFindConfig.config.highlight.proximityHighlightClass,
-                        acrossElements: true,
-                        separateWordSearch: false,
-                        done: () => {
-                            console.log(`Found ${proximityMatches.length} proximity matches`);
-                            if (callback) callback(proximityMatches.length);
-                        }
-                    });
+        
+                    // If wholeWords is desired, add word-boundary markers.
+                    let escapedTerm1 = options.wholeWords ? "\\b" + escapeRegex(term1) + "\\b" : escapeRegex(term1);
+                    let escapedTerm2 = options.wholeWords ? "\\b" + escapeRegex(term2) + "\\b" : escapeRegex(term2);
+        
+                    // Build a pattern that allows up to maxDistance words between the two terms.
+                    // The pattern (?:\W+\w+){0,maxDistance}\W* means: 
+                    // "0 to maxDistance occurrences of (some non-word characters then a word)"
+                    let intervening = `(?:\\W+\\w+){0,${maxDistance}}\\W*`;
+        
+                    // Build two possible orders: term1 followed by term2, or term2 followed by term1.
+                    let pattern1 = escapedTerm1 + intervening + escapedTerm2;
+                    let pattern2 = escapedTerm2 + intervening + escapedTerm1;
+        
+                    // Combine the two with alternation.
+                    let combinedPattern = "(" + pattern1 + ")|(" + pattern2 + ")";
+                    
+                    // Set regex flags: global and optionally case-insensitive.
+                    let flags = options.caseSensitive ? "g" : "gi";
+        
+                    try {
+                        let combinedRegex = new RegExp(combinedPattern, flags);
+                        console.log("Using proximity regex:", combinedRegex);
+                        
+                        // Use mark.js to highlight all matches of the combined regex.
+                        this.markInstance.markRegExp(combinedRegex, {
+                            className: window.advancedFindConfig.config.highlight.proximityHighlightClass,
+                            acrossElements: true,
+                            separateWordSearch: false,
+                            done: (count) => {
+                                console.log(`Found ${count} proximity matches`);
+                                if (callback) callback(count);
+                            }
+                        });
+                    } catch (e) {
+                        console.error("Error creating proximity regex:", e);
+                        if (callback) callback(0);
+                    }
                 }
             });
         }
+        
+        
+        
 
         findAllMatches(regex) {
             let matches = [];
@@ -2121,7 +2141,7 @@ function(){function n(e){t(this,n),this.ctx=e,this.ie=!1;var r=window.navigator.
     window.HighlightManager = HighlightManager;
     window.highlightManager = new HighlightManager();
     window.highlightManager.initialize();
-})();..
+})();.
 ===== C:\Users\jason\OneDrive\Desktop\Coding\advfindv\modules\search-utils.js ===== 
 // /modules/search-utils.js
 (() => {
@@ -2186,4 +2206,4 @@ function(){function n(e){t(this,n),this.ctx=e,this.ie=!1;var r=window.navigator.
         findProximityMatches
     };
 })();
-..
+.
