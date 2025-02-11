@@ -16,7 +16,7 @@
             this.textNodeCache = [];
             let position = 0;
         
-            // Recursive function to traverse all nodes, including shadow roots.
+            // Recursive function to traverse all nodes, including shadow roots. Another great thing I learned from AI.
             function traverse(node) {
                 if (node.nodeType === Node.TEXT_NODE) {
                     let text = node.textContent;
@@ -71,7 +71,7 @@
                                 options.wholeWords,
                                 options.useRegex
                             );
-// Determine whether we are on a complex page like Reddit
+// Determine whether we are on Reddit. Reddit didn't play nicely. 
 let disableAcrossElements = window.location.href.indexOf("reddit.com") !== -1;
 
 this.markInstance.markRegExp(regex, {
@@ -93,10 +93,8 @@ this.markInstance.markRegExp(regex, {
         }
 
         highlightProximity(term1, term2, maxDistance, options, callback) {
-            // First, remove any existing highlights.
             this.markInstance.unmark({
                 done: () => {
-                    // Helper to escape regex special characters.
                     function escapeRegex(str) {
                         return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
                     }
@@ -105,9 +103,6 @@ this.markInstance.markRegExp(regex, {
                     let escapedTerm1 = options.wholeWords ? "\\b" + escapeRegex(term1) + "\\b" : escapeRegex(term1);
                     let escapedTerm2 = options.wholeWords ? "\\b" + escapeRegex(term2) + "\\b" : escapeRegex(term2);
         
-                    // Build a pattern that allows up to maxDistance words between the two terms.
-                    // The pattern (?:\W+\w+){0,maxDistance}\W* means: 
-                    // "0 to maxDistance occurrences of (some non-word characters then a word)"
                     let intervening = `(?:\\W+\\w+){0,${maxDistance}}\\W*`;
         
                     // Build two possible orders: term1 followed by term2, or term2 followed by term1.

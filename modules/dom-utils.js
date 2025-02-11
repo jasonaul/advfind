@@ -184,7 +184,7 @@
         return path.join(' > ');
     }
 
-    // *** NEW: A simple debounce function to help throttle rapid events ***
+    // *** NEW: A simple debounce function to help throttle rapid events. Thank you AI for your service. ***
     function debounce(func, wait) {
         let timeout;
         return function (...args) {
