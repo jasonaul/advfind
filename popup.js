@@ -35,9 +35,11 @@ document.addEventListener("DOMContentLoaded", () => {
         chrome.tabs.sendMessage(activeTabId, { type: "CHECK_INJECTION" }, (response) => {
             if (chrome.runtime.lastError) {
                 handleConnectionError();
-            } else if (response && response.injected) {
+              } else if (response && response.injected) {
                 console.log("Content script is ready");
                 contentScriptReady = true;
+                // Inform live search module that content script is ready
+                window.advancedFindLiveSearch.setContentScriptReady(true);
                 initializeUI();
             } else {
                 console.log("Content script not ready, injecting...");
@@ -210,12 +212,14 @@ document.addEventListener("DOMContentLoaded", () => {
     // --- End Regex Mode ---
 
     function initializeUI() {
-        updateStatus("Extension is ready!");
-        setupEventListeners();
-        setupProximitySearchUI();
-        setupSettingsPanel();
-        setupRegexMode();
-    }
+      updateStatus("Extension is ready!");
+      setupEventListeners();
+      setupProximitySearchUI();
+      setupSettingsPanel();
+      // Initialize Live Search here, passing activeTabId and initial contentScriptReady status
+      window.advancedFindLiveSearch.initializeLiveSearch(activeTabId, contentScriptReady);
+      setupRegexMode();
+  }
 
     function handleClear() {
         if (!contentScriptReady || !activeTabId) return;
@@ -261,6 +265,13 @@ document.addEventListener("DOMContentLoaded", () => {
                 }
             });
         }
+
+        if (searchInput) {
+          searchInput.addEventListener('input', (event) => {
+              const searchTerm = event.target.value.trim();
+              window.advancedFindLiveSearch.performLiveSearch(searchTerm); // Call live search from live-search.js
+          });
+      }
     
         if (clearButton) {
             clearButton.addEventListener("click", handleClear);

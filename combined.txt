@@ -1,0 +1,2496 @@
+===== C:\Users\jason\Desktop\Coding Projects 2025\advfindv\background.js ===== 
+// background.js
+
+// Keep track of injected tabs
+const injectedTabs = new Set();
+
+// Listen for tab updates
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    if (changeInfo.status === 'complete' && tab.url &&
+        !tab.url.startsWith('chrome://') &&
+        !injectedTabs.has(tabId)) {
+
+        // Inject scripts one by one in sequence
+        injectScriptsSequentially(tabId)
+            .then(() => {
+                console.log('All scripts injected successfully');
+                injectedTabs.add(tabId);
+                // No need to send INITIALIZE_CONTENT_SCRIPT, it initializes itself
+            })
+            .catch(err => console.error('Failed to inject scripts:', err));
+    }
+});
+
+async function injectScriptsSequentially(tabId) {
+    const scripts = [
+        'lib/mark.min.js', // Include mark.js here
+        'modules/config.js',
+        'modules/dom-utils.js',
+        'modules/search-utils.js',
+        'modules/highlight-manager.js',
+        'content.js'
+    ];
+
+    for (const script of scripts) {
+        try {
+            await chrome.scripting.executeScript({
+                target: { tabId: tabId },
+                files: [script]
+            });
+            console.log(`Injected ${script} successfully`);
+        } catch (error) {
+            console.error(`Failed to inject ${script}:`, error);
+            throw error; // Important: Re-throw the error to stop the chain.
+        }
+    }
+}
+
+// Clean up injectedTabs when a tab is closed
+chrome.tabs.onRemoved.addListener((tabId) => {
+    injectedTabs.delete(tabId);
+});
+
+// Handle messages (simplified - only for content script readiness)
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.type === "CONTENT_SCRIPT_READY") {
+        console.log("Content script ready in tab:", sender.tab?.id);
+        sendResponse({ received: true });
+    }
+    // Return false here. We're not sending any asynchronous responses *from background.js*.
+    return false;
+});
+
+// Create a context menu item on install
+chrome.runtime.onInstalled.addListener(() => {
+    chrome.contextMenus.create({
+        id: "advanced-find-context-menu",
+        title: "Advanced Find on this page",
+        contexts: ["page"]
+    });
+});
+
+// Listen for context menu clicks to toggle sidebar
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+    if (info.menuItemId === "advanced-find-context-menu" && tab.id) {
+        chrome.tabs.sendMessage(tab.id, { type: "TOGGLE_SIDEBAR" });
+    }
+});
+===== C:\Users\jason\Desktop\Coding Projects 2025\advfindv\content.js ===== 
+// ===== Inject Enhanced Highlight Styles into Main Document and Shadow DOM =====
+(function injectEnhancedHighlightStyles() {
+    const styleId = "afe-highlight-style";
+  
+    function createStyleElement() {
+      const style = document.createElement("style");
+      style.id = styleId;
+      // Increase specificity by targeting mark elements within html body
+      style.textContent = `
+        html body mark.afe-highlight {
+          background-color: yellow !important;
+          color: black !important;
+          padding: 0.1em !important;
+          border-radius: 0.2em !important;
+          box-shadow: 0 0 0 1px yellow !important;
+        }
+        html body mark.afe-highlight-current {
+          background-color: lightblue !important;
+          color: black !important;
+          box-shadow: 0 0 0 1px lightblue !important;
+        }
+        html body mark.afe-highlight-proximity {
+          background-color: lightgreen !important;
+          color: black !important;
+        }
+        html body mark.afe-highlight-secondary {
+          background-color: red !important;
+          color: white !important;
+        }
+      `;
+      return style;
+    }
+  
+    // Inject the style into the main document head if not already present.
+    if (!document.getElementById(styleId)) {
+      const style = createStyleElement();
+      if (document.head) {
+        document.head.appendChild(style);
+      } else {
+        document.addEventListener("DOMContentLoaded", () => {
+          document.head.appendChild(style);
+        });
+      }
+    }
+  
+    // Function to inject a clone of the style element into a given shadow root.
+    function injectStyleIntoShadow(root) {
+      if (!root) return;
+      if (!root.querySelector(`#${styleId}`)) {
+        const styleClone = createStyleElement();
+        root.appendChild(styleClone);
+      }
+      // Recursively check for nested shadow roots.
+      Array.from(root.children).forEach(child => {
+        if (child.shadowRoot) {
+          injectStyleIntoShadow(child.shadowRoot);
+        }
+      });
+    }
+  
+    // Find all elements with a shadowRoot and inject the style there.
+    document.querySelectorAll("*").forEach(el => {
+      if (el.shadowRoot) {
+        injectStyleIntoShadow(el.shadowRoot);
+      }
+    });
+  })();
+  
+  
+
+(() => {
+    let isContentScriptInjected = false;
+    let highlightManager = null;
+    // window.advancedFindDomUtils.injectHighlightStyle();
+
+
+    function injectSidebarStyles() {
+        const style = document.createElement('style');
+        style.id = 'advanced-find-sidebar-styles';
+        style.textContent = `
+          body.has-advanced-find-sidebar {
+            margin-right: var(--sidebar-width, 350px) !important;
+            transition: margin-right 0.3s ease;
+            width: calc(100% - var(--sidebar-width, 350px)) !important;
+            position: relative;
+          }
+          #advanced-find-sidebar-container {
+            position: fixed;
+            top: 0;
+            right: 0;
+            width: var(--sidebar-width, 350px);
+            height: 100vh;
+            background: white;
+            z-index: 2147483647;
+            border-left: 1px solid #ccc;
+            box-shadow: -2px 0 5px rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s ease;
+            display: flex;
+            flex-direction: column;
+          }
+          #advanced-find-sidebar {
+            width: 100%;
+            height: 100%;
+            border: none;
+            background: white;
+            flex: 1;
+          }
+        `;
+        document.head.appendChild(style);
+    }
+
+    function initResizableSidebar() {
+        const sidebarContainer = document.getElementById('advanced-find-sidebar-container');
+        if (!sidebarContainer) return;
+        let isResizing = false;
+        let startX, startWidth;
+
+        const resizeHandle = document.createElement('div');
+        resizeHandle.className = 'sidebar-resize-handle';
+        resizeHandle.style.cssText = `
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 3px;
+            cursor: ew-resize;
+            background: transparent;
+            transition: background-color 0.2s ease;
+        `;
+        sidebarContainer.appendChild(resizeHandle);
+
+        resizeHandle.addEventListener('mouseenter', () => {
+            if (!isResizing) {
+                resizeHandle.style.backgroundColor = 'rgba(0, 0, 0, 0.1)';
+            }
+        });
+        resizeHandle.addEventListener('mouseleave', () => {
+            if (!isResizing) {
+                resizeHandle.style.backgroundColor = 'transparent';
+            }
+        });
+
+        resizeHandle.addEventListener('mousedown', (e) => {
+            if (e.button !== 0) return;
+            isResizing = true;
+            startX = e.clientX;
+            startWidth = sidebarContainer.offsetWidth;
+            resizeHandle.style.backgroundColor = 'rgba(0, 0, 0, 0.2)';
+            document.body.style.cursor = 'ew-resize';
+            document.body.style.userSelect = 'none';
+            const iframe = document.getElementById('advanced-find-sidebar');
+            if (iframe) {
+                iframe.style.pointerEvents = 'none';
+            }
+
+            document.addEventListener('mousemove', handleMouseMove);
+            document.addEventListener('mouseup', handleMouseUp);
+            e.preventDefault();
+            e.stopPropagation();
+        });
+
+        function handleMouseMove(e) {
+            if (!isResizing) return;
+            const diff = e.clientX - startX;
+            let newWidth = Math.min(800, Math.max(250, startWidth - diff));
+            requestAnimationFrame(() => {
+                sidebarContainer.style.width = `${newWidth}px`;
+                document.documentElement.style.setProperty('--sidebar-width', `${newWidth}px`);
+            });
+            e.preventDefault();
+        }
+
+        function handleMouseUp(e) {
+            if (!isResizing) return;
+            isResizing = false;
+            resizeHandle.style.backgroundColor = 'transparent';
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            const iframe = document.getElementById('advanced-find-sidebar');
+            if (iframe) {
+                iframe.style.pointerEvents = '';
+            }
+            document.removeEventListener('mousemove', handleMouseMove);
+            document.removeEventListener('mouseup', handleMouseUp);
+
+            const finalWidth = sidebarContainer.offsetWidth;
+            chrome.storage.sync.set({ sidebarWidth: finalWidth });
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        chrome.storage.sync.get(['sidebarWidth'], (result) => {
+            if (result.sidebarWidth) {
+                const width = result.sidebarWidth;
+                sidebarContainer.style.width = `${width}px`;
+                document.documentElement.style.setProperty('--sidebar-width', `${width}px`);
+            }
+        });
+
+        return function cleanup() {
+            resizeHandle.remove();
+            document.removeEventListener('mousemove', handleMouseMove);
+            document.removeEventListener('mouseup', handleMouseUp);
+        };
+    }
+
+
+    function initializeContentScript() {
+        if (isContentScriptInjected) return;
+
+        try {
+            // Access the highlightManager directly from the window object.
+            highlightManager = window.highlightManager;
+            setupMessageListeners();
+
+            // Debounced reapply function (simplified)
+            let lastSearchText = null;
+            let lastOptions = null;
+
+            const debouncedReapply = debounce(() => {
+                if (lastSearchText && lastOptions && !lastOptions.isProximity) {
+                    console.warn("🔄 Reapplying the highlights due to DOM changes...");
+                    highlightManager.highlight(lastSearchText, lastOptions);
+                }
+            }, 300);
+            
+            const observer = new MutationObserver((mutations) => {
+                if (!document.querySelector(".afe-highlight, .afe-highlight-proximity, .afe-highlight-secondary")) {
+                    debouncedReapply();
+                }
+            });
+            observer.observe(document.body, { childList: true, subtree: true });
+            
+
+            isContentScriptInjected = true;
+            console.log("Advanced Find Extension: Content script initialized successfully");
+            chrome.runtime.sendMessage({ type: "CONTENT_SCRIPT_READY" });
+        } catch (error) {
+            console.error('Error initializing content script:', error);
+        }
+    }
+
+    function setupMessageListeners() {
+        chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+            if (!highlightManager) {
+                sendResponse({ success: false, error: "Highlight manager not initialized" });
+                return true; // keep channel open for async responses.
+            }
+
+            switch (request.type) {
+                case "CHECK_INJECTION":
+                    sendResponse({ injected: isContentScriptInjected });
+                    break;
+
+                case "SEARCH_TEXT":
+                    // Store the search term and options for later re-application
+                    lastSearchText = request.payload.searchTerm;
+                    lastOptions = request.payload.options;
+
+                    highlightManager.highlight(lastSearchText, lastOptions);
+                    sendResponse({success: true}); // Acknowledge receipt
+                    break;
+
+                    case "SEARCH_PROXIMITY":
+                        // Pass the callback to return the match count.
+                        highlightManager.highlightProximity(
+                            request.payload.searchTerm,
+                            request.payload.searchTerm2,
+                            request.payload.proximityValue,
+                            request.payload.options,
+                            (count) => {
+                                sendResponse({ success: true, count });
+                            }
+                        );
+                        return true; // Keep message channel open
+                    
+                    
+
+                case "CLEAR_HIGHLIGHTS":
+                    highlightManager.clearHighlights();
+                    removeTickMarks(); // Remove tick marks
+                    sendResponse({ success: true });
+                    break;
+
+
+                case "TOGGLE_SIDEBAR": {
+                    let sidebarContainer = document.getElementById('advanced-find-sidebar-container');
+                    if (sidebarContainer) {
+                        sidebarContainer.classList.toggle('hidden');
+                        document.body.classList.toggle('sidebar-hidden');
+                        sendResponse({ success: true });
+                    } else {
+                        injectSidebarStyles();
+                        document.body.classList.add('has-advanced-find-sidebar');
+                        sidebarContainer = document.createElement('div');
+                        sidebarContainer.id = 'advanced-find-sidebar-container';
+                        const iframe = document.createElement('iframe');
+                        iframe.id = 'advanced-find-sidebar';
+                        iframe.src = chrome.runtime.getURL('popup.html');
+                        iframe.src = chrome.runtime.getURL('popup.html');
+                        sidebarContainer.appendChild(iframe);
+                        document.body.appendChild(sidebarContainer);
+                        setTimeout(() => {
+                            initResizableSidebar();
+                            sendResponse({ success: true });
+                        }, 100);
+                        return true; // Keep the message channel open for the setTimeout.
+                    }
+                    break;
+                }
+
+                case "NAVIGATE":
+                    // Calls the navigate() method (defined in highlight-manager.js below)
+                    highlightManager.navigate(request.payload.direction);
+                    sendResponse({ success: true });
+                    break;
+        
+
+                case "CLEANUP_SIDEBAR":
+                    cleanupSidebar();
+                    sendResponse({ success: true });
+                    break;
+
+                case "RENDER_TICK_MARKS":
+                    renderTickMarks();
+                    sendResponse({success: true}); // Acknowledge
+                    break;
+            }
+
+            return true; // Keep the message channel open for async responses.
+        });
+    }
+
+
+    function cleanupSidebar() {
+        const sidebarContainer = document.getElementById('advanced-find-sidebar-container');
+        if (sidebarContainer) {
+            sidebarContainer.remove();
+        }
+        const styles = document.getElementById('advanced-find-sidebar-styles');
+        if (styles) {
+            styles.remove();
+        }
+        document.body.classList.remove('has-advanced-find-sidebar', 'sidebar-hidden');
+    }
+
+    // --- Tick Mark Rendering ---
+    function renderTickMarks() {
+        let container = document.getElementById("tick-mark-container");
+        if (container) container.remove();
+
+        container = document.createElement("div");
+        container.id = "tick-mark-container";
+        container.style.position = "fixed";
+        container.style.top = "0";
+        container.style.right = "0";
+        container.style.width = "10px";
+        container.style.height = "100%";
+        container.style.zIndex = "2147483646"; // just below our sidebar
+        document.body.appendChild(container);
+
+        const docHeight = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
+        const highlights = document.querySelectorAll(".afe-highlight, .afe-highlight-proximity");  //Also include proximity
+        highlights.forEach(span => {
+            const rect = span.getBoundingClientRect();
+            const topPosition = ((rect.top + window.scrollY) / docHeight) * 100;
+            const tick = document.createElement("div");
+            tick.className = "tick-mark";
+            tick.style.position = "absolute";
+            tick.style.left = "0";
+            tick.style.width = "10px";
+            tick.style.height = "5px";
+            tick.style.backgroundColor = window.advancedFindConfig.tickMarkColor; // Use configured color
+            tick.style.top = `calc(${topPosition}% - 2.5px)`;
+            tick.style.cursor = "pointer";
+            tick.addEventListener("click", () => {
+                span.scrollIntoView({ behavior: "smooth", block: "center" });
+            });
+            container.appendChild(tick);
+        });
+    }
+
+    function removeTickMarks() {
+        const container = document.getElementById("tick-mark-container");
+        if (container) container.remove();
+    }
+
+    // Simple debounce function
+    function debounce(func, wait) {
+        let timeout;
+        return function(...args) {
+            const context = this;
+            clearTimeout(timeout);
+            timeout = setTimeout(() => func.apply(context, args), wait);
+        };
+    }
+
+
+    initializeContentScript(); // Initialize immediately
+
+})();
+===== C:\Users\jason\Desktop\Coding Projects 2025\advfindv\popup.js ===== 
+// /popup.js
+document.addEventListener("DOMContentLoaded", () => {
+    console.log("Popup DOM ready");
+
+    let activeTabId = null;
+    let contentScriptReady = false;
+    let retryCount = 0;
+    const MAX_RETRIES = 5;
+    const RETRY_DELAY = 200;
+    let lastSearchTerm = ""; // New: stores the last search term used
+    
+
+    function initializePopup() {
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+            if (tabs && tabs[0]) {
+                if (tabs[0].url.startsWith('chrome://') || tabs[0].url.startsWith('edge://')) {
+                    updateStatus("Error: Cannot run on browser pages");
+                    return;
+                }
+                activeTabId = tabs[0].id;
+                checkContentScript();
+                renderSearchHistory(); // if you’re maintaining search history
+            } else {
+                console.error("No active tab found.");
+                updateStatus("Error: No active tab found");
+            }
+        });
+    }
+
+    function checkContentScript() {
+        if (!activeTabId) {
+            console.error("No active tab ID available");
+            return;
+        }
+        chrome.tabs.sendMessage(activeTabId, { type: "CHECK_INJECTION" }, (response) => {
+            if (chrome.runtime.lastError) {
+                handleConnectionError();
+            } else if (response && response.injected) {
+                console.log("Content script is ready");
+                contentScriptReady = true;
+                initializeUI();
+            } else {
+                console.log("Content script not ready, injecting...");
+                injectContentScript();
+            }
+        });
+    }
+
+    function handleConnectionError() {
+        if (retryCount < MAX_RETRIES) {
+            retryCount++;
+            console.log(`Retrying connection (<span class="math-inline">\{retryCount\}/</span>{MAX_RETRIES})...`);
+            setTimeout(() => {
+                injectContentScript();
+            }, RETRY_DELAY * retryCount);
+        } else {
+            console.error("Failed to establish connection with content script");
+            updateStatus("Error: Failed to connect to page");
+            retryCount = 0;
+        }
+    }
+
+
+    function injectContentScript() {
+        chrome.scripting.executeScript({
+            target: { tabId: activeTabId },
+            files: [
+                "lib/mark.min.js", // Include mark.js here
+                "modules/config.js",
+                "modules/dom-utils.js",
+                "modules/search-utils.js",
+                "modules/highlight-manager.js",
+                "content.js"
+            ]
+        }).then(() => {
+            console.log("Content script injected successfully");
+            // No need to send INITIALIZE_CONTENT_SCRIPT, it initializes itself
+            setTimeout(checkContentScript, 100);
+        }).catch(error => {
+            console.error("Failed to inject content script:", error);
+            updateStatus("Error: Failed to initialize extension");
+            handleConnectionError();
+        });
+    }
+
+    function updateStatus(message) {
+        const statusElement = document.getElementById("status");
+        if (statusElement) {
+            statusElement.textContent = message;
+        }
+    }
+
+    // --- Regex Mode Functions ---
+    function switchToRegexMode() {
+        console.log("Switching to Regex Mode UI.");
+        document.getElementById("standard-mode").classList.add("hidden");
+        document.getElementById("regex-mode").classList.remove("hidden");
+    }
+
+    function returnToStandardMode() {
+        console.log("Returning to Standard Mode UI.");
+        document.getElementById("regex-mode").classList.add("hidden");
+        document.getElementById("standard-mode").classList.remove("hidden");
+    }
+
+    function setupRegexMode() {
+        const regexCheckbox = document.getElementById("regexCheckbox");
+        if (!regexCheckbox) {
+            console.error("Regex checkbox not found in the DOM!");
+            return;
+        }
+        console.log("setupRegexMode: found regexCheckbox:", regexCheckbox);
+
+        regexCheckbox.addEventListener("change", (e) => {
+            console.log("Regex checkbox change event fired. Checked =", e.target.checked);
+            if (e.target.checked) {
+                switchToRegexMode();
+            } else {
+                returnToStandardMode();
+            }
+        });
+
+        const regexOptions = document.getElementsByName("regexOption");
+        regexOptions.forEach(option => {
+            option.addEventListener("change", (e) => {
+                const input = document.getElementById("regexSearchInput");
+                switch (e.target.value) {
+                    case "numbers":
+                        input.value = "\\b\\d{5,}\\b";
+                        break;
+                    case "emails":
+                        input.value = "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}";
+                        break;
+                    case "urls":
+                        input.value = "https?:\\/\\/[\\w\\.-]+(?:\\.[\\w\\.-]+)+[\\w\\-\\._~:/?#[\\]@!$&'()*+,;=.]+";
+                        break;
+                    case "words":
+                        input.value = "\\b\\w+\\b";
+                        break;
+                    default:
+                        input.value = "";
+                }
+                console.log("Regex option changed, new regex:", input.value);
+            });
+        });
+
+        const regexHelpButton = document.getElementById("regexHelpButton");
+        if (regexHelpButton) {
+            regexHelpButton.addEventListener("click", () => {
+                const helpModal = document.getElementById("regexHelpModal");
+                if (helpModal) {
+                    helpModal.classList.toggle("hidden");
+                }
+            });
+        }
+
+        const regexHelpClose = document.getElementById("regexHelpClose");
+        if (regexHelpClose) {
+            regexHelpClose.addEventListener("click", () => {
+                const helpModal = document.getElementById("regexHelpModal");
+                if (helpModal) {
+                    helpModal.classList.add("hidden");
+                }
+            });
+        }
+
+        document.getElementById("returnStandardMode").addEventListener("click", () => {
+            document.getElementById("regexCheckbox").checked = false;
+            returnToStandardMode();
+        });
+
+        document.getElementById("regexSearchButton").addEventListener("click", () => {
+            const searchTerm = document.getElementById("regexSearchInput").value;
+            if (!contentScriptReady || !activeTabId) return;
+            console.log("Regex mode search initiated with term:", searchTerm);
+            chrome.tabs.sendMessage(activeTabId, {
+                type: "SEARCH_TEXT",
+                payload: {
+                    searchTerm,
+                    searchTerm2: "",  // No second term in regex mode
+                    proximityValue: 0, // No proximity in regex mode
+                    options: {
+                        caseSensitive: document.getElementById("caseSensitiveCheckbox")?.checked || false,
+                        wholeWords: document.getElementById("wholeWordsCheckbox")?.checked || false,
+                        useRegex: true, // IMPORTANT: Set useRegex to true
+                        proximitySearch: false,
+                        isProximity: false
+                    }
+                }
+            }, (response) => {
+                if (chrome.runtime.lastError) {
+                    console.error("Regex search error:", chrome.runtime.lastError);
+                    updateStatus("Search failed");
+                } else if (response) {
+                    console.log("Regex search response:", response);
+                    updateStatus(`Found ${response.count} matches`);
+                       setTimeout(() => {
+                        chrome.tabs.sendMessage(activeTabId, { type: "RENDER_TICK_MARKS" });
+                    }, 200);
+                }
+            });
+        });
+
+        document.getElementById("regexClearButton").addEventListener("click", () => {
+            if (!contentScriptReady || !activeTabId) return;
+            chrome.tabs.sendMessage(activeTabId, { type: "CLEAR_HIGHLIGHTS" });
+            updateStatus("");
+        });
+    }
+    // --- End Regex Mode ---
+
+    function initializeUI() {
+        updateStatus("Extension is ready!");
+        setupEventListeners();
+        setupProximitySearchUI();
+        setupSettingsPanel();
+        setupRegexMode();
+    }
+
+    function handleClear() {
+        if (!contentScriptReady || !activeTabId) return;
+        chrome.tabs.sendMessage(activeTabId, { type: "CLEAR_HIGHLIGHTS" });
+        updateStatus("");
+    }
+
+
+
+
+    function setupEventListeners() {
+        const searchButton = document.getElementById("searchButton");
+        const searchInput = document.getElementById("searchTermInput");
+        const clearButton = document.getElementById("clearButton");
+        const nextButton = document.getElementById("nextButton");
+        const prevButton = document.getElementById("prevButton");
+        const searchProximityButton = document.getElementById("searchProximityButton");
+    
+        if (searchButton && searchInput) {
+            searchButton.addEventListener("click", () => {
+                const term = searchInput.value.trim();
+                if (!term) return;
+                lastSearchTerm = term; // Update last search term
+                handleSearch(term);
+                updateSearchHistory(term);
+            });
+            searchInput.addEventListener("keyup", (event) => {
+                if (event.key === "Enter") {
+                    const term = searchInput.value.trim();
+                    if (!term) return;
+                    if (term === lastSearchTerm) {
+                        // Same search term—trigger navigation to next match.
+                        chrome.tabs.sendMessage(activeTabId, {
+                            type: "NAVIGATE",
+                            payload: { direction: "next" }
+                        });
+                    } else {
+                        // New search term—update and perform a new search.
+                        lastSearchTerm = term;
+                        handleSearch(term);
+                        updateSearchHistory(term);
+                    }
+                }
+            });
+        }
+    
+        if (clearButton) {
+            clearButton.addEventListener("click", handleClear);
+        }
+        if (nextButton) {
+            nextButton.addEventListener("click", () => handleNavigation("next"));
+        }
+        if (prevButton) {
+            prevButton.addEventListener("click", () => handleNavigation("previous"));
+        }
+        if (searchProximityButton) {
+            searchProximityButton.addEventListener("click", handleProximitySearch);
+        }
+    }
+    
+
+    function handleProximitySearch() {
+        if (!contentScriptReady || !activeTabId) {
+            console.error("Content script not ready or no active tab");
+            return;
+        }
+
+        const searchTerm1 = document.getElementById("proximityTerm1")?.value; // Use new IDs
+        const searchTerm2 = document.getElementById("proximityTerm2")?.value; // Use new IDs
+        const proximityValue = parseInt(document.getElementById("proximityValue")?.value || "10");
+
+        if (!searchTerm1 || !searchTerm2) {
+            updateStatus("Please enter both search terms for proximity search.");
+            return;
+        }
+
+        const caseSensitive = document.getElementById("caseSensitiveCheckbox")?.checked || false;
+        const wholeWords = document.getElementById("wholeWordsCheckbox")?.checked || false;
+        const options = {
+            caseSensitive: caseSensitive,
+            wholeWords: wholeWords,
+            useRegex: false,
+            proximitySearch: true,
+            isProximity: true
+        };
+
+        chrome.tabs.sendMessage(activeTabId, {
+            type: "SEARCH_PROXIMITY",
+            payload: {
+                searchTerm: searchTerm1,  // Use new variable names
+                searchTerm2: searchTerm2,
+                proximityValue: proximityValue,
+                options: options
+            }
+        }, (response) => {
+           if (chrome.runtime.lastError) {
+                console.error("Proximity search error:", chrome.runtime.lastError);
+                updateStatus("Proximity search failed");
+            } else if (response) {
+                console.log("Proximity search response:", response);
+                updateStatus(`Found ${response.count} proximity matches`);
+                   setTimeout(() => {
+                    chrome.tabs.sendMessage(activeTabId, { type: "RENDER_TICK_MARKS" });
+                }, 200);
+            }
+        });
+    }
+
+
+    function setupProximitySearchUI() {
+        const proximitySearchCheckbox = document.getElementById("proximitySearchCheckbox");
+        const proximitySearchContainer = document.getElementById("proximity-controls");
+        
+        if (proximitySearchCheckbox && proximitySearchContainer) {
+            proximitySearchCheckbox.addEventListener("change", (event) => {
+                proximitySearchContainer.classList.toggle("hidden", !event.target.checked);
+            });
+        }
+    }
+
+    function handleSearch(searchTerm) {
+        if (!contentScriptReady || !activeTabId) {
+            console.error("Content script not ready or no active tab");
+            return;
+        }
+        // REMOVE proximity-related variables from here
+        const caseSensitive = document.getElementById("caseSensitiveCheckbox")?.checked || false;
+        const wholeWords = document.getElementById("wholeWordsCheckbox")?.checked || false;
+        const useRegex = document.getElementById("regexCheckbox")?.checked || false;
+
+        // Build the options object to send to the content script
+        const options = {
+            caseSensitive: caseSensitive,
+            wholeWords: wholeWords,
+            useRegex: useRegex,
+            proximitySearch: false, // Ensure it's false here
+            isProximity: false
+        };
+
+        console.log("Sending search request for:", searchTerm, "with options:", options);
+
+        chrome.tabs.sendMessage(activeTabId, {
+            type: "SEARCH_TEXT",
+            payload: {
+                searchTerm,
+                searchTerm2: "", // No second term
+                proximityValue: 0, //No proximity
+                options // Send the options object
+            }
+        }, (response) => {
+            if (chrome.runtime.lastError) {
+                console.error("Search error:", chrome.runtime.lastError);
+                updateStatus("Search failed");
+            } else if (response) {
+                console.log("Search response:", response);
+                updateStatus(`Found ${response.count} matches`);
+                   setTimeout(() => {
+                    chrome.tabs.sendMessage(activeTabId, { type: "RENDER_TICK_MARKS" });
+                }, 200);
+            }
+        });
+    }
+    // --- Settings Panel Setup ---
+    function setupSettingsPanel() {
+        const settingsButton = document.getElementById('settings-button');
+        const settingsPanel = document.getElementById('settings-panel');
+        const closeSettings = document.getElementById('close-settings');
+        const highlightColorPicker = document.getElementById('highlight-color');
+        const restoreDefaultButton = document.getElementById('restore-default-color');
+        const displayModeInputs = document.getElementsByName('display-mode');
+        const ignoreDiacriticsCheckbox = document.getElementById('ignoreDiacriticsCheckbox');
+        const animationSpeedInput = document.getElementById('animationSpeed');
+
+        chrome.storage.sync.get(
+          ['highlightColor', 'displayMode', 'ignoreDiacritics', 'animationSpeed'],
+          (result) => {
+            if (result.highlightColor) {
+              highlightColorPicker.value = result.highlightColor;
+            }
+            const displayMode = result.displayMode || 'popup';
+            const input = Array.from(displayModeInputs).find(input => input.value === displayMode);
+            if (input) input.checked = true;
+            if (displayMode === 'sidebar') {
+              document.body.classList.add('sidebar-mode');
+            } else {
+              document.body.classList.remove('sidebar-mode');
+            }
+            if (result.ignoreDiacritics !== undefined) {
+              ignoreDiacriticsCheckbox.checked = result.ignoreDiacritics;
+            }
+            if (result.animationSpeed) {
+              animationSpeedInput.value = result.animationSpeed;
+            }
+          }
+        );
+
+        restoreDefaultButton.addEventListener('click', () => {
+          const defaultColor = window.advancedFindConfig.config.settings.defaultHighlightColor;
+          highlightColorPicker.value = defaultColor;
+          chrome.storage.sync.set({ highlightColor: defaultColor }, () => {
+            if (activeTabId) {
+              chrome.tabs.sendMessage(activeTabId, {
+                type: "UPDATE_HIGHLIGHT_COLOR",
+                payload: { color: defaultColor }
+              });
+            }
+          });
+        });
+
+        settingsButton.addEventListener('click', () => {
+          settingsPanel.classList.remove('hidden');
+        });
+
+        closeSettings.addEventListener('click', () => {
+          settingsPanel.classList.add('hidden');
+        });
+
+        highlightColorPicker.addEventListener('change', (e) => {
+          const newColor = e.target.value;
+          chrome.storage.sync.set({ highlightColor: newColor }, () => {
+            if (activeTabId) {
+              chrome.tabs.sendMessage(activeTabId, {
+                type: "UPDATE_HIGHLIGHT_COLOR",
+                payload: { color: newColor }
+              });
+            }
+          });
+        });
+
+        displayModeInputs.forEach(input => {
+          input.addEventListener('change', (e) => {
+            const newMode = e.target.value;
+            chrome.storage.sync.set({ displayMode: newMode }, () => {
+              if (newMode === 'sidebar') {
+                document.body.classList.add('sidebar-mode');
+                window.close(); // Close the popup when switching to sidebar
+                if (activeTabId) {
+                  chrome.tabs.sendMessage(activeTabId, { type: "TOGGLE_SIDEBAR" });
+                }
+              } else {
+                document.body.classList.remove('sidebar-mode');
+                if (activeTabId) {
+                  chrome.tabs.sendMessage(activeTabId, { type: "CLEANUP_SIDEBAR" });
+                }
+              }
+            });
+          });
+        });
+
+        if (ignoreDiacriticsCheckbox) {
+          ignoreDiacriticsCheckbox.addEventListener('change', (e) => {
+            chrome.storage.sync.set({ ignoreDiacritics: e.target.checked });
+          });
+        }
+
+        if (animationSpeedInput) {
+          animationSpeedInput.addEventListener('change', (e) => {
+            const speed = parseInt(e.target.value, 10);
+            chrome.storage.sync.set({ animationSpeed: speed });
+          });
+        }
+      }
+
+    // --- Regex Mode Setup with Next/Previous Buttons (Already Corrected) ---
+      function setupRegexMode() {
+        const regexCheckbox = document.getElementById("regexCheckbox");
+        if (!regexCheckbox) {
+          console.error("Regex checkbox not found in the DOM!");
+          return;
+        }
+        regexCheckbox.addEventListener("change", (e) => {
+          if (e.target.checked) {
+            switchToRegexMode();
+          } else {
+            returnToStandardMode();
+          }
+        });
+
+        const regexOptions = document.getElementsByName("regexOption");
+        regexOptions.forEach(option => {
+          option.addEventListener("change", (e) => {
+            const input = document.getElementById("regexSearchInput");
+            switch (e.target.value) {
+              case "numbers":
+                // Only match numbers of 5 or more digits
+                input.value = "\\b\\d{5,}\\b";
+                break;
+              case "emails":
+                input.value = "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}";
+                break;
+              case "urls":
+                input.value = "https?:\\/\\/[\\w\\.-]+(?:\\.[\\w\\.-]+)+[\\w\\-\\._~:/?#[\\]@!$&'()*+,;=.]+";
+                break;
+              case "words":
+                input.value = "\\b\\w+\\b";
+                break;
+              default:
+                input.value = "";
+            }
+          });
+        });
+
+        // Regex help button & modal event listeners (as before)
+        const regexHelpButton = document.getElementById("regexHelpButton");
+        if (regexHelpButton) {
+          regexHelpButton.addEventListener("click", () => {
+            const helpModal = document.getElementById("regexHelpModal");
+            if (helpModal) {
+              helpModal.classList.toggle("hidden");
+            }
+          });
+        }
+        const regexHelpClose = document.getElementById("regexHelpClose");
+        if (regexHelpClose) {
+          regexHelpClose.addEventListener("click", () => {
+            const helpModal = document.getElementById("regexHelpModal");
+            if (helpModal) {
+              helpModal.classList.add("hidden");
+            }
+          });
+        }
+
+        document.getElementById("returnStandardMode").addEventListener("click", () => {
+          document.getElementById("regexCheckbox").checked = false;
+          returnToStandardMode();
+        });
+
+        document.getElementById("regexSearchButton").addEventListener("click", () => {
+          const searchTerm = document.getElementById("regexSearchInput").value;
+          if (!contentScriptReady || !activeTabId) return;
+          chrome.tabs.sendMessage(activeTabId, {
+            type: "SEARCH_TEXT",
+            payload: {
+              searchTerm,
+              searchTerm2: "",
+              proximityValue: 0,
+              options: {
+                caseSensitive: document.getElementById("caseSensitiveCheckbox")?.checked || false,
+                wholeWords: document.getElementById("wholeWordsCheckbox")?.checked || false,
+                useRegex: true,
+                proximitySearch: false,
+                isProximity: false
+              }
+            }
+          }, (response) => {
+            if (chrome.runtime.lastError) {
+              console.error("Regex search error:", chrome.runtime.lastError);
+            }
+              else if (response) {
+                    console.log("Search response:", response);
+                    updateStatus(`Found ${response.count} matches`);
+                    // --- NEW: After a short delay, render tick marks ---
+                    setTimeout(() => {
+                        chrome.tabs.sendMessage(activeTabId, { type: "RENDER_TICK_MARKS" });
+                    }, 200);
+                }
+          });
+        });
+
+        document.getElementById("regexClearButton").addEventListener("click", () => {
+          if (!contentScriptReady || !activeTabId) return;
+          chrome.tabs.sendMessage(activeTabId, { type: "CLEAR_HIGHLIGHTS" });
+        });
+
+        // Regex navigation buttons
+        document.getElementById("regexNextButton").addEventListener("click", () => {
+          if (!contentScriptReady || !activeTabId) return;
+          chrome.tabs.sendMessage(activeTabId, {
+            type: "NAVIGATE",
+            payload: { direction: "next" }
+          });
+        });
+        document.getElementById("regexPrevButton").addEventListener("click", () => {
+          if (!contentScriptReady || !activeTabId) return;
+          chrome.tabs.sendMessage(activeTabId, {  type: "NAVIGATE",
+            payload: { direction: "previous" }
+          });
+        });
+      }
+
+
+        // --- Optional: Search History functions ---
+        function updateSearchHistory(searchTerm) {
+            // (Implementation for updating history - if you add this feature)
+        }
+        function renderSearchHistory() {
+            // (Implementation for rendering history - if you add this feature)
+        }
+        // --- End Search History functions ---
+
+        initializePopup();
+    });
+===== C:\Users\jason\Desktop\Coding Projects 2025\advfindv\popup.html ===== 
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Advanced Find</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="popup.css">
+  <!-- Additional modern styles that won't conflict with existing CSS -->
+  <style>
+    :root {
+      --primary: #2563eb;
+      --primary-hover: #1d4ed8;
+      --surface: #ffffff;
+      --surface-hover: #f9fafb;
+      --border: #e5e7eb;
+      --text: #1f2937;
+      --text-secondary: #6b7280;
+      --radius: 8px;
+      --shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, sans-serif;
+      min-width: 350px;
+      margin: 0;
+      background: var(--surface);
+      color: var(--text);
+    }
+
+    #container {
+      padding: 16px;
+    }
+
+    .header-container {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    h1 {
+      font-size: 18px;
+      font-weight: 600;
+      margin: 0;
+      color: var(--text);
+    }
+
+    .icon-button {
+      width: 36px;
+      height: 36px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      color: var(--text);
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .icon-button:hover {
+      background: var(--surface-hover);
+      border-color: #d1d5db;
+    }
+
+    .search-container {
+      margin-bottom: 12px;
+    }
+
+    input[type="text"],
+    input[type="number"] {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: 14px;
+      transition: all 0.2s;
+      box-sizing: border-box;
+    }
+
+    input[type="text"]:focus,
+    input[type="number"]:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+    }
+
+    .button-group {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .primary-button {
+      background: var(--primary);
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: var(--radius);
+      font-weight: 500;
+      font-size: 14px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .primary-button:hover {
+      background: var(--primary-hover);
+    }
+
+    .secondary-button {
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--border);
+      padding: 8px 16px;
+      border-radius: var(--radius);
+      font-weight: 500;
+      font-size: 14px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .secondary-button:hover {
+      background: var(--surface-hover);
+    }
+
+    .checkbox-group {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px;
+      margin-bottom: 16px;
+      padding: 12px;
+      background: var(--surface-hover);
+      border-radius: var(--radius);
+    }
+
+    .checkbox-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+      color: var(--text);
+      cursor: pointer;
+    }
+
+    #proximity-controls {
+      background: var(--surface-hover);
+      padding: 12px;
+      border-radius: var(--radius);
+      margin-bottom: 16px;
+    }
+
+    #proximity-controls .input-group {
+      margin-bottom: 12px;
+    }
+
+    #proximity-controls label {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 14px;
+      color: var(--text-secondary);
+    }
+
+    #status {
+      font-size: 14px;
+      color: var(--text-secondary);
+      margin-bottom: 12px;
+    }
+
+    /* Settings Panel Styles */
+    .settings-panel {
+      position: fixed;
+      inset: 0;
+      background: var(--surface);
+      padding: 16px;
+      z-index: 1000;
+    }
+
+    .settings-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+    }
+
+    .setting-item {
+      margin-bottom: 16px;
+    }
+
+    .setting-item label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 500;
+    }
+
+    /* Help Section Styles */
+    .help-section {
+      margin-bottom: 20px;
+    }
+
+    .help-section h3 {
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: var(--text);
+    }
+
+    .help-section ul {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+
+    .help-section li {
+      margin-bottom: 8px;
+      font-size: 14px;
+      color: var(--text-secondary);
+    }
+
+    code {
+      background: var(--surface-hover);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 13px;
+      color: var(--primary);
+    }
+
+    /* Color Picker Styles */
+    .color-picker-group {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    input[type="color"] {
+      width: 40px;
+      height: 40px;
+      padding: 0;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      cursor: pointer;
+    }
+
+    /* Radio Group Styles */
+    .radio-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .radio-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+      c
+    .modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1100;
+    }
+
+    .modal-content {
+      background: var(--surface);
+      padding: 24px;
+      border-radius: var(--radius);
+      max-width: 500px;
+      width: 90%;
+      max-height: 90vh;
+      overflow-y: auto;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+  </style>
+</head>
+<body>
+  <div id="container">
+    <div class="header-container">
+      <h1>Advanced Find</h1>
+      <button id="settings-button" class="icon-button" aria-label="Settings">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+        </svg>
+      </button>
+    </div>
+
+    <!-- Standard Mode -->
+    <div id="standard-mode">
+      <div class="search-container">
+        <input type="text" id="searchTermInput" placeholder="Enter search term..." aria-label="Search term" />
+      </div>
+
+      <div class="button-group">
+        <button id="searchButton" class="primary-button">Search</button>
+        <button id="clearButton" class="secondary-button">Clear</button>
+      </div>
+
+      <div class="checkbox-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="caseSensitiveCheckbox" />
+          Case Sensitive
+        </label>
+        <label class="checkbox-label">
+          <input type="checkbox" id="wholeWordsCheckbox" />
+          Whole Words
+        </label>
+        <label class="checkbox-label">
+          <input type="checkbox" id="regexCheckbox" />
+          Regex Mode
+        </label>
+        <label class="checkbox-label">
+          <input type="checkbox" id="proximitySearchCheckbox" />
+          Proximity Search
+        </label>
+      </div>
+
+      <div id="proximity-controls" class="hidden">
+        <div class="input-group">
+          <label for="proximityTerm1">First Search Term</label>
+          <input type="text" id="proximityTerm1" placeholder="Enter first term" />
+        </div>
+        <div class="input-group">
+          <label for="proximityTerm2">Second Search Term</label>
+          <input type="text" id="proximityTerm2" placeholder="Enter second term" />
+        </div>
+        <div class="input-group">
+          <label for="proximityValue">Maximum Words Between</label>
+          <input type="number" id="proximityValue" min="1" max="50" value="10" />
+        </div>
+        <button id="searchProximityButton" class="primary-button">Search Proximity</button>
+      </div>
+
+      <div id="status" aria-live="assertive"></div>
+
+      <div class="button-group">
+        <button id="prevButton" class="secondary-button">Previous</button>
+        <button id="nextButton" class="secondary-button">Next</button>
+      </div>
+    </div>
+
+    <!-- Regex Mode -->
+    <div id="regex-mode" class="hidden">
+      <button id="returnStandardMode" class="secondary-button">Return to Standard Mode</button>
+      
+      <div class="search-container">
+        <input type="text" id="regexSearchInput" placeholder="Enter regex pattern..." />
+        <button id="regexHelpButton" class="icon-button" aria-label="Regex Help">?</button>
+      </div>
+
+      <div class="checkbox-group">
+        <label class="radio-label">
+          <input type="radio" name="regexOption" value="numbers" checked>
+          Numbers (\d+)
+        </label>
+        <label class="radio-label">
+          <input type="radio" name="regexOption" value="emails">
+          Email Addresses
+        </label>
+        <label class="radio-label">
+          <input type="radio" name="regexOption" value="urls">
+          URLs
+        </label>
+        <label class="radio-label">
+          <input type="radio" name="regexOption" value="words">
+          Words (\b\w+\b)
+        </label>
+      </div>
+
+      <div class="button-group">
+        <button id="regexSearchButton" class="primary-button">Search</button>
+        <button id="regexClearButton" class="secondary-button">Clear</button>
+      </div>
+      <div class="button-group">
+        <button id="regexPrevButton" class="secondary-button">Previous</button>
+        <button id="regexNextButton" class="secondary-button">Next</button>
+      </div>
+    </div>
+
+    <!-- Settings Panel -->
+    <div id="settings-panel" class="settings-panel hidden">
+      <div class="settings-header">
+        <h2>Settings</h2>
+        <button id="close-settings" class="icon-button" aria-label="Close Settings">×</button>
+      </div>
+      <div class="settings-content">
+        <div class="setting-item">
+          <label for="highlight-color">Highlight Color</label>
+          <div class="color-picker-group">
+            <input type="color" id="highlight-color" value="#ffff00"/>
+            <button id="restore-default-color" class="secondary-button">Restore Default</button>
+          </div>
+        </div>
+        <div class="setting-item">
+          <label>Display Mode</label>
+          <div class="radio-group">
+            <label class="radio-label">
+              <input type="radio" name="display-mode" value="popup" checked>
+              Popup
+            </label>
+            <label class="radio-label">
+              <input type="radio" name="display-mode" value="sidebar">
+              Sidebar
+            </label>
+          </div>
+        </div>
+        <div class="setting-item">
+          <label class="checkbox-label">
+            <input type="checkbox" id="ignoreDiacriticsCheckbox"/>
+            Ignore Diacritics
+          </label>
+        </div>
+        <div class="setting-item">
+          <label for="animationSpeed">Highlight Animation Speed (ms)</label>
+          <input type="number" id="animationSpeed" min="0" max="1000" step="50" value="300"/>
+        </div>
+      </div>
+    </div>
+
+    <!-- Regex Help Modal -->
+    <div id="regexHelpModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="regexHelpTitle">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 id="regexHelpTitle">Regex Help</h2>
+          <button id="regexHelpClose" class="icon-button" aria-label="Close Regex Help">×</button>
+        </div>
+        <div class="modal-body">
+          <p>Regular Expressions (Regex) are patterns used to match character combinations in strings.</p>
+          
+          <div class="help-section">
+            <h3>Basic Syntax:</h3>
+            <ul>
+              <li><code>\d</code> — matches a digit (0–9)</li>
+              <li><code>\w</code> — matches any word character (letters, digits, underscore)</li>
+              <li><code>\s</code> — matches any whitespace character</li>
+            </ul>
+          </div>
+          
+          <div class="help-section">
+            <h3>Quantifiers:</h3>
+            <ul>
+              <li><code>+</code> — one or more occurrences</li>
+              <li><code>*</code> — zero or more occurrences</li>
+              <li><code>{n}</code> — exactly n occurrences</li>
+              <li><code>{n,}</code> — n or more occurrences</li>
+              <li><code>{n,m}</code> — between n and m occurrences</li>
+            </ul>
+          </div>
+
+          <div class="help-section">
+            <h3>Examples:</h3>
+            <ul>
+              <li><code>\b\d{5,}\b</code> — numbers with 5 or more digits</li>
+              <li><code>[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}</code> — email addresses</li>
+              <li><code>\b\w+\b</code> — whole words</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
+===== C:\Users\jason\Desktop\Coding Projects 2025\advfindv\popup.css ===== 
+/* Base Styles */
+body {
+  min-width: 350px;
+  font-family: 'Roboto', sans-serif;
+  margin: 0;
+  padding: 15px;
+  box-sizing: border-box;
+  background-color: #f9f9f9;
+  color: #333;
+}
+
+/* Container Layout */
+#container {
+  width: 100%;
+  min-width: 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  padding: 20px;
+  box-sizing: border-box;
+  background-color: #fff;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+/* Form Elements */
+input[type="text"],
+.search-input,
+input[type="number"] {
+  padding: 10px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 1em;
+  width: 100%;
+  box-sizing: border-box;
+  transition: border-color 0.2s;
+}
+input[type="text"]:focus,
+.search-input:focus,
+input[type="number"]:focus {
+  outline: none;
+  border-color: #4CAF50;
+}
+
+/* Buttons */
+button {
+  padding: 10px 16px;
+  background-color: #4CAF50;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 1em;
+  transition: background-color 0.2s;
+  width: 100%;
+  box-sizing: border-box;
+}
+button:hover {
+  background-color: #45a045;
+}
+button:disabled {
+  background-color: #cccccc;
+  cursor: default;
+}
+.secondary-button {
+  padding: 8px 12px;
+  background-color: #f0f0f0;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  cursor: pointer;
+  color: #333;
+  transition: background-color 0.2s;
+}
+.secondary-button:hover {
+  background-color: #e0e0e0;
+}
+.icon-button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 5px;
+  color: #555;
+}
+.icon-button:hover {
+  background-color: #f0f0f0;
+  border-radius: 50%;
+}
+
+/* Options and Labels */
+#options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+label {
+  font-size: 0.95em;
+}
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+/* Radio Group */
+.radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 5px;
+}
+.radio-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+/* Status and Indicators */
+#matchCount,
+#status {
+  font-size: 0.95em;
+  margin-top: 8px;
+}
+#status {
+  color: red;
+}
+
+/* Highlighting (nonintrusive) */
+.afe-highlight.current { 
+  background-color: lightblue !important; 
+}
+
+.afe-highlight { 
+  background-color: yellow !important; 
+}
+
+.afe-highlight-proximity { 
+  background-color: lightgreen !important; 
+}
+
+.afe-highlight-secondary { 
+  background-color: red !important; 
+}
+
+
+/* Proximity Search Section */
+#proximity-controls {
+  margin-top: 10px;
+  padding: 10px;
+  border-top: 1px solid #eee;
+  background-color: #f7f7f7;
+  border-radius: 4px;
+}
+
+/* Input Group */
+.input-group {
+  margin: 10px 0;
+}
+.input-group label {
+  display: block;
+  margin-bottom: 5px;
+  font-size: 0.95em;
+  color: #555;
+}
+
+/* Settings Panel */
+.settings-panel {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(255,255,255,0.95);
+  z-index: 1000;
+  padding: 20px;
+  box-sizing: border-box;
+  overflow-y: auto;
+}
+.settings-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+.settings-header h2 {
+  margin: 0;
+  font-size: 1.5em;
+}
+.setting-item {
+  margin-bottom: 20px;
+}
+.setting-item label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 500;
+}
+.color-picker-group {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+/* Position Settings Button */
+#settings-button {
+  position: fixed;
+  right: 15px;
+  top: 15px;
+  z-index: 1100;
+}
+
+/* Close Settings Button */
+#close-settings {
+  font-size: 24px;
+  line-height: 1;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+/* Sidebar Styles */
+#advanced-find-sidebar-container {
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 100vh;
+  background: #fff;
+  z-index: 2147483647;
+  border-left: 1px solid #ccc;
+  box-shadow: -2px 0 5px rgba(0,0,0,0.1);
+  display: flex;
+  flex-direction: column;
+  min-width: 250px;
+  width: 350px;
+  overflow: hidden;
+}
+#advanced-find-sidebar-container:hover {
+  cursor: ew-resize;
+}
+#advanced-find-sidebar-container::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: transparent;
+  cursor: ew-resize;
+}
+#advanced-find-sidebar-container:hover::before {
+  background: rgba(0, 0, 0, 0.1);
+}
+#advanced-find-sidebar {
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: #fff;
+  flex: 1;
+}
+
+/* Utility Classes */
+.hidden {
+  display: none !important;
+}
+
+/* Sidebar Mode */
+body.sidebar-mode {
+  width: 100%;
+  height: 100vh;
+  margin: 0;
+  padding: 15px;
+  box-sizing: border-box;
+}
+body.sidebar-mode #container {
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+}
+body.has-advanced-find-sidebar {
+  margin-right: var(--sidebar-width, 350px) !important;
+  transition: none;
+  width: calc(100% - var(--sidebar-width, 350px)) !important;
+  position: relative;
+}
+.sidebar-resize-handle {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.sidebar-resize-handle:hover {
+  opacity: 1;
+}
+
+/* Replace Section Styles */
+#replace-section {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+/* Search History Section Styles */
+#search-history-section {
+  margin-top: 10px;
+  border-top: 1px solid #ccc;
+  padding-top: 10px;
+}
+#search-history-section ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+#search-history-section li {
+  cursor: pointer;
+  padding: 4px;
+  border-bottom: 1px solid #eee;
+}
+
+/* Regex Mode Specific Styles */
+.regex-input-group {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+/* Modal Styles for Regex Help */
+.modal {
+  position: fixed;
+  z-index: 1100;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  background-color: rgba(0,0,0,0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+.modal-content {
+  background-color: #fff;
+  border-radius: 8px;
+  padding: 20px;
+  width: 90%;
+  max-width: 500px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+  position: relative;
+}
+.modal .close {
+  position: absolute;
+  right: 15px;
+  top: 10px;
+  font-size: 24px;
+  cursor: pointer;
+  color: #999;
+}
+.modal .close:hover {
+  color: #666;
+}
+
+===== C:\Users\jason\Desktop\Coding Projects 2025\advfindv\lib\mark.min.js ===== 
+/*!***************************************************
+* mark.js v9.0.0
+* https://markjs.io/
+* Copyright (c) 2014–2018, Julian Kühnel
+* Released under the MIT license https://git.io/vwTVl
+*****************************************************/
+!function(e,t){"object"==typeof exports&&"undefined"!=typeof module?module.exports=t():"function"==typeof define&&define.amd?define(t):e.Mark=t()}(this,function(){"use strict";function e(t){return(e="function"==typeof Symbol&&"symbol"==typeof Symbol.iterator?function(e){return typeof e}:function(e){return e&&"function"==typeof Symbol&&e.constructor===Symbol&&e!==Symbol.prototype?"symbol":typeof e})(t)}function t(e,t){if(!(e instanceof t))throw new TypeError("Cannot call a class as a function")}function n(e,t){for(var n=0;n<t.length;n++){var r=t[n];r.enumerable=r.enumerable||!1,r.configurable=!0,"value"in r&&(r.writable=!0),Object.defineProperty(e,r.key,r)}}function r(e,t,r){return t&&n(e.prototype,t),r&&n(e,r),e}function o(){return(o=Object.assign||function(e){for(var t=1;t<arguments.length;t++){var n=arguments[t];for(var r in n)Object.prototype.hasOwnProperty.call(n,r)&&(e[r]=n[r])}return e}).apply(this,arguments)}var i=
+/* */
+function(){function e(n){var r=!(arguments.length>1&&void 0!==arguments[1])||arguments[1],o=arguments.length>2&&void 0!==arguments[2]?arguments[2]:[],i=arguments.length>3&&void 0!==arguments[3]?arguments[3]:5e3;t(this,e),this.ctx=n,this.iframes=r,this.exclude=o,this.iframesTimeout=i}return r(e,[{key:"getContexts",value:function(){var e=[];return(void 0!==this.ctx&&this.ctx?NodeList.prototype.isPrototypeOf(this.ctx)?Array.prototype.slice.call(this.ctx):Array.isArray(this.ctx)?this.ctx:"string"==typeof this.ctx?Array.prototype.slice.call(document.querySelectorAll(this.ctx)):[this.ctx]:[]).forEach(function(t){var n=e.filter(function(e){return e.contains(t)}).length>0;-1!==e.indexOf(t)||n||e.push(t)}),e}},{key:"getIframeContents",value:function(e,t){var n,r=arguments.length>2&&void 0!==arguments[2]?arguments[2]:function(){};try{var o=e.contentWindow;if(n=o.document,!o||!n)throw new Error("iframe inaccessible")}catch(e){r()}n&&t(n)}},{key:"isIframeBlank",value:function(e){var t="about:blank",n=e.getAttribute("src").trim();return e.contentWindow.location.href===t&&n!==t&&n}},{key:"observeIframeLoad",value:function(e,t,n){var r=this,o=!1,i=null,a=function a(){if(!o){o=!0,clearTimeout(i);try{r.isIframeBlank(e)||(e.removeEventListener("load",a),r.getIframeContents(e,t,n))}catch(e){n()}}};e.addEventListener("load",a),i=setTimeout(a,this.iframesTimeout)}},{key:"onIframeReady",value:function(e,t,n){try{"complete"===e.contentWindow.document.readyState?this.isIframeBlank(e)?this.observeIframeLoad(e,t,n):this.getIframeContents(e,t,n):this.observeIframeLoad(e,t,n)}catch(e){n()}}},{key:"waitForIframes",value:function(e,t){var n=this,r=0;this.forEachIframe(e,function(){return!0},function(e){r++,n.waitForIframes(e.querySelector("html"),function(){--r||t()})},function(e){e||t()})}},{key:"forEachIframe",value:function(t,n,r){var o=this,i=arguments.length>3&&void 0!==arguments[3]?arguments[3]:function(){},a=t.querySelectorAll("iframe"),s=a.length,c=0;a=Array.prototype.slice.call(a);var u=function(){--s<=0&&i(c)};s||u(),a.forEach(function(t){e.matches(t,o.exclude)?u():o.onIframeReady(t,function(e){n(t)&&(c++,r(e)),u()},u)})}},{key:"createIterator",value:function(e,t,n){return document.createNodeIterator(e,t,n,!1)}},{key:"createInstanceOnIframe",value:function(t){return new e(t.querySelector("html"),this.iframes)}},{key:"compareNodeIframe",value:function(e,t,n){if(e.compareDocumentPosition(n)&Node.DOCUMENT_POSITION_PRECEDING){if(null===t)return!0;if(t.compareDocumentPosition(n)&Node.DOCUMENT_POSITION_FOLLOWING)return!0}return!1}},{key:"getIteratorNode",value:function(e){var t=e.previousNode();return{prevNode:t,node:null===t?e.nextNode():e.nextNode()&&e.nextNode()}}},{key:"checkIframeFilter",value:function(e,t,n,r){var o=!1,i=!1;return r.forEach(function(e,t){e.val===n&&(o=t,i=e.handled)}),this.compareNodeIframe(e,t,n)?(!1!==o||i?!1===o||i||(r[o].handled=!0):r.push({val:n,handled:!0}),!0):(!1===o&&r.push({val:n,handled:!1}),!1)}},{key:"handleOpenIframes",value:function(e,t,n,r){var o=this;e.forEach(function(e){e.handled||o.getIframeContents(e.val,function(e){o.createInstanceOnIframe(e).forEachNode(t,n,r)})})}},{key:"iterateThroughNodes",value:function(e,t,n,r,o){for(var i,a,s,c=this,u=this.createIterator(t,e,r),l=[],h=[];s=void 0,s=c.getIteratorNode(u),a=s.prevNode,i=s.node;)this.iframes&&this.forEachIframe(t,function(e){return c.checkIframeFilter(i,a,e,l)},function(t){c.createInstanceOnIframe(t).forEachNode(e,function(e){return h.push(e)},r)}),h.push(i);h.forEach(function(e){n(e)}),this.iframes&&this.handleOpenIframes(l,e,n,r),o()}},{key:"forEachNode",value:function(e,t,n){var r=this,o=arguments.length>3&&void 0!==arguments[3]?arguments[3]:function(){},i=this.getContexts(),a=i.length;a||o(),i.forEach(function(i){var s=function(){r.iterateThroughNodes(e,i,t,n,function(){--a<=0&&o()})};r.iframes?r.waitForIframes(i,s):s()})}}],[{key:"matches",value:function(e,t){var n="string"==typeof t?[t]:t,r=e.matches||e.matchesSelector||e.msMatchesSelector||e.mozMatchesSelector||e.oMatchesSelector||e.webkitMatchesSelector;if(r){var o=!1;return n.every(function(t){return!r.call(e,t)||(o=!0,!1)}),o}return!1}}]),e}(),a=
+/* */
+function(){function e(n){t(this,e),this.opt=o({},{diacritics:!0,synonyms:{},accuracy:"partially",caseSensitive:!1,ignoreJoiners:!1,ignorePunctuation:[],wildcards:"disabled"},n)}return r(e,[{key:"create",value:function(e){return"disabled"!==this.opt.wildcards&&(e=this.setupWildcardsRegExp(e)),e=this.escapeStr(e),Object.keys(this.opt.synonyms).length&&(e=this.createSynonymsRegExp(e)),(this.opt.ignoreJoiners||this.opt.ignorePunctuation.length)&&(e=this.setupIgnoreJoinersRegExp(e)),this.opt.diacritics&&(e=this.createDiacriticsRegExp(e)),e=this.createMergedBlanksRegExp(e),(this.opt.ignoreJoiners||this.opt.ignorePunctuation.length)&&(e=this.createJoinersRegExp(e)),"disabled"!==this.opt.wildcards&&(e=this.createWildcardsRegExp(e)),e=this.createAccuracyRegExp(e),new RegExp(e,"gm".concat(this.opt.caseSensitive?"":"i"))}},{key:"sortByLength",value:function(e){return e.sort(function(e,t){return e.length===t.length?e>t?1:-1:t.length-e.length})}},{key:"escapeStr",value:function(e){return e.replace(/[\-\[\]\/\{\}\(\)\*\+\?\.\\\^\$\|]/g,"\\$&")}},{key:"createSynonymsRegExp",value:function(e){var t=this,n=this.opt.synonyms,r=this.opt.caseSensitive?"":"i",o=this.opt.ignoreJoiners||this.opt.ignorePunctuation.length?"\0":"";for(var i in n)if(n.hasOwnProperty(i)){var a=Array.isArray(n[i])?n[i]:[n[i]];a.unshift(i),(a=this.sortByLength(a).map(function(e){return"disabled"!==t.opt.wildcards&&(e=t.setupWildcardsRegExp(e)),e=t.escapeStr(e)}).filter(function(e){return""!==e})).length>1&&(e=e.replace(new RegExp("(".concat(a.map(function(e){return t.escapeStr(e)}).join("|"),")"),"gm".concat(r)),o+"(".concat(a.map(function(e){return t.processSynonyms(e)}).join("|"),")")+o))}return e}},{key:"processSynonyms",value:function(e){return(this.opt.ignoreJoiners||this.opt.ignorePunctuation.length)&&(e=this.setupIgnoreJoinersRegExp(e)),e}},{key:"setupWildcardsRegExp",value:function(e){return(e=e.replace(/(?:\\)*\?/g,function(e){return"\\"===e.charAt(0)?"?":""})).replace(/(?:\\)*\*/g,function(e){return"\\"===e.charAt(0)?"*":""})}},{key:"createWildcardsRegExp",value:function(e){var t="withSpaces"===this.opt.wildcards;return e.replace(/\u0001/g,t?"[\\S\\s]?":"\\S?").replace(/\u0002/g,t?"[\\S\\s]*?":"\\S*")}},{key:"setupIgnoreJoinersRegExp",value:function(e){return e.replace(/[^(|)\\]/g,function(e,t,n){var r=n.charAt(t+1);return/[(|)\\]/.test(r)||""===r?e:e+"\0"})}},{key:"createJoinersRegExp",value:function(e){var t=[],n=this.opt.ignorePunctuation;return Array.isArray(n)&&n.length&&t.push(this.escapeStr(n.join(""))),this.opt.ignoreJoiners&&t.push("\\u00ad\\u200b\\u200c\\u200d"),t.length?e.split(/\u0000+/).join("[".concat(t.join(""),"]*")):e}},{key:"createDiacriticsRegExp",value:function(e){var t=this.opt.caseSensitive?"":"i",n=this.opt.caseSensitive?["aàáảãạăằắẳẵặâầấẩẫậäåāą","AÀÁẢÃẠĂẰẮẲẴẶÂẦẤẨẪẬÄÅĀĄ","cçćč","CÇĆČ","dđď","DĐĎ","eèéẻẽẹêềếểễệëěēę","EÈÉẺẼẸÊỀẾỂỄỆËĚĒĘ","iìíỉĩịîïī","IÌÍỈĨỊÎÏĪ","lł","LŁ","nñňń","NÑŇŃ","oòóỏõọôồốổỗộơởỡớờợöøō","OÒÓỎÕỌÔỒỐỔỖỘƠỞỠỚỜỢÖØŌ","rř","RŘ","sšśșş","SŠŚȘŞ","tťțţ","TŤȚŢ","uùúủũụưừứửữựûüůū","UÙÚỦŨỤƯỪỨỬỮỰÛÜŮŪ","yýỳỷỹỵÿ","YÝỲỶỸỴŸ","zžżź","ZŽŻŹ"]:["aàáảãạăằắẳẵặâầấẩẫậäåāąAÀÁẢÃẠĂẰẮẲẴẶÂẦẤẨẪẬÄÅĀĄ","cçćčCÇĆČ","dđďDĐĎ","eèéẻẽẹêềếểễệëěēęEÈÉẺẼẸÊỀẾỂỄỆËĚĒĘ","iìíỉĩịîïīIÌÍỈĨỊÎÏĪ","lłLŁ","nñňńNÑŇŃ","oòóỏõọôồốổỗộơởỡớờợöøōOÒÓỎÕỌÔỒỐỔỖỘƠỞỠỚỜỢÖØŌ","rřRŘ","sšśșşSŠŚȘŞ","tťțţTŤȚŢ","uùúủũụưừứửữựûüůūUÙÚỦŨỤƯỪỨỬỮỰÛÜŮŪ","yýỳỷỹỵÿYÝỲỶỸỴŸ","zžżźZŽŻŹ"],r=[];return e.split("").forEach(function(o){n.every(function(n){if(-1!==n.indexOf(o)){if(r.indexOf(n)>-1)return!1;e=e.replace(new RegExp("[".concat(n,"]"),"gm".concat(t)),"[".concat(n,"]")),r.push(n)}return!0})}),e}},{key:"createMergedBlanksRegExp",value:function(e){return e.replace(/[\s]+/gim,"[\\s]+")}},{key:"createAccuracyRegExp",value:function(e){var t=this,n=this.opt.accuracy,r="string"==typeof n?n:n.value,o="string"==typeof n?[]:n.limiters,i="";switch(o.forEach(function(e){i+="|".concat(t.escapeStr(e))}),r){case"partially":default:return"()(".concat(e,")");case"complementary":return i="\\s"+(i||this.escapeStr("!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~¡¿")),"()([^".concat(i,"]*").concat(e,"[^").concat(i,"]*)");case"exactly":return"(^|\\s".concat(i,")(").concat(e,")(?=$|\\s").concat(i,")")}}}]),e}(),s=
+/* */
+function(){function n(e){t(this,n),this.ctx=e,this.ie=!1;var r=window.navigator.userAgent;(r.indexOf("MSIE")>-1||r.indexOf("Trident")>-1)&&(this.ie=!0)}return r(n,[{key:"log",value:function(t){var n=arguments.length>1&&void 0!==arguments[1]?arguments[1]:"debug",r=this.opt.log;this.opt.debug&&"object"===e(r)&&"function"==typeof r[n]&&r[n]("mark.js: ".concat(t))}},{key:"getSeparatedKeywords",value:function(e){var t=this,n=[];return e.forEach(function(e){t.opt.separateWordSearch?e.split(" ").forEach(function(e){e.trim()&&-1===n.indexOf(e)&&n.push(e)}):e.trim()&&-1===n.indexOf(e)&&n.push(e)}),{keywords:n.sort(function(e,t){return t.length-e.length}),length:n.length}}},{key:"isNumeric",value:function(e){return Number(parseFloat(e))==e}},{key:"checkRanges",value:function(e){var t=this;if(!Array.isArray(e)||"[object Object]"!==Object.prototype.toString.call(e[0]))return this.log("markRanges() will only accept an array of objects"),this.opt.noMatch(e),[];var n=[],r=0;return e.sort(function(e,t){return e.start-t.start}).forEach(function(e){var o=t.callNoMatchOnInvalidRanges(e,r),i=o.start,a=o.end;o.valid&&(e.start=i,e.length=a-i,n.push(e),r=a)}),n}},{key:"callNoMatchOnInvalidRanges",value:function(e,t){var n,r,o=!1;return e&&void 0!==e.start?(r=(n=parseInt(e.start,10))+parseInt(e.length,10),this.isNumeric(e.start)&&this.isNumeric(e.length)&&r-t>0&&r-n>0?o=!0:(this.log("Ignoring invalid or overlapping range: "+"".concat(JSON.stringify(e))),this.opt.noMatch(e))):(this.log("Ignoring invalid range: ".concat(JSON.stringify(e))),this.opt.noMatch(e)),{start:n,end:r,valid:o}}},{key:"checkWhitespaceRanges",value:function(e,t,n){var r,o=!0,i=n.length,a=t-i,s=parseInt(e.start,10)-a;return(r=(s=s>i?i:s)+parseInt(e.length,10))>i&&(r=i,this.log("End range automatically set to the max value of ".concat(i))),s<0||r-s<0||s>i||r>i?(o=!1,this.log("Invalid range: ".concat(JSON.stringify(e))),this.opt.noMatch(e)):""===n.substring(s,r).replace(/\s+/g,"")&&(o=!1,this.log("Skipping whitespace only range: "+JSON.stringify(e)),this.opt.noMatch(e)),{start:s,end:r,valid:o}}},{key:"getTextNodes",value:function(e){var t=this,n="",r=[];this.iterator.forEachNode(NodeFilter.SHOW_TEXT,function(e){r.push({start:n.length,end:(n+=e.textContent).length,node:e})},function(e){return t.matchesExclude(e.parentNode)?NodeFilter.FILTER_REJECT:NodeFilter.FILTER_ACCEPT},function(){e({value:n,nodes:r})})}},{key:"matchesExclude",value:function(e){return i.matches(e,this.opt.exclude.concat(["script","style","title","head","html"]))}},{key:"wrapRangeInTextNode",value:function(e,t,n){var r=this.opt.element?this.opt.element:"mark",o=e.splitText(t),i=o.splitText(n-t),a=document.createElement(r);return a.setAttribute("data-markjs","true"),this.opt.className&&a.setAttribute("class",this.opt.className),a.textContent=o.textContent,o.parentNode.replaceChild(a,o),i}},{key:"wrapRangeInMappedTextNode",value:function(e,t,n,r,o){var i=this;e.nodes.every(function(a,s){var c=e.nodes[s+1];if(void 0===c||c.start>t){if(!r(a.node))return!1;var u=t-a.start,l=(n>a.end?a.end:n)-a.start,h=e.value.substr(0,a.start),f=e.value.substr(l+a.start);if(a.node=i.wrapRangeInTextNode(a.node,u,l),e.value=h+f,e.nodes.forEach(function(t,n){n>=s&&(e.nodes[n].start>0&&n!==s&&(e.nodes[n].start-=l),e.nodes[n].end-=l)}),n-=l,o(a.node.previousSibling,a.start),!(n>a.end))return!1;t=a.end}return!0})}},{key:"wrapGroups",value:function(e,t,n,r){return r((e=this.wrapRangeInTextNode(e,t,t+n)).previousSibling),e}},{key:"separateGroups",value:function(e,t,n,r,o){for(var i=t.length,a=1;a<i;a++){var s=e.textContent.indexOf(t[a]);t[a]&&s>-1&&r(t[a],e)&&(e=this.wrapGroups(e,s,t[a].length,o))}return e}},{key:"wrapMatches",value:function(e,t,n,r,o){var i=this,a=0===t?0:t+1;this.getTextNodes(function(t){t.nodes.forEach(function(t){var o;for(t=t.node;null!==(o=e.exec(t.textContent))&&""!==o[a];){if(i.opt.separateGroups)t=i.separateGroups(t,o,a,n,r);else{if(!n(o[a],t))continue;var s=o.index;if(0!==a)for(var c=1;c<a;c++)s+=o[c].length;t=i.wrapGroups(t,s,o[a].length,r)}e.lastIndex=0}}),o()})}},{key:"wrapMatchesAcrossElements",value:function(e,t,n,r,o){var i=this,a=0===t?0:t+1;this.getTextNodes(function(t){for(var s;null!==(s=e.exec(t.value))&&""!==s[a];){var c=s.index;if(0!==a)for(var u=1;u<a;u++)c+=s[u].length;var l=c+s[a].length;i.wrapRangeInMappedTextNode(t,c,l,function(e){return n(s[a],e)},function(t,n){e.lastIndex=n,r(t)})}o()})}},{key:"wrapRangeFromIndex",value:function(e,t,n,r){var o=this;this.getTextNodes(function(i){var a=i.value.length;e.forEach(function(e,r){var s=o.checkWhitespaceRanges(e,a,i.value),c=s.start,u=s.end;s.valid&&o.wrapRangeInMappedTextNode(i,c,u,function(n){return t(n,e,i.value.substring(c,u),r)},function(t){n(t,e)})}),r()})}},{key:"unwrapMatches",value:function(e){for(var t=e.parentNode,n=document.createDocumentFragment();e.firstChild;)n.appendChild(e.removeChild(e.firstChild));t.replaceChild(n,e),this.ie?this.normalizeTextNode(t):t.normalize()}},{key:"normalizeTextNode",value:function(e){if(e){if(3===e.nodeType)for(;e.nextSibling&&3===e.nextSibling.nodeType;)e.nodeValue+=e.nextSibling.nodeValue,e.parentNode.removeChild(e.nextSibling);else this.normalizeTextNode(e.firstChild);this.normalizeTextNode(e.nextSibling)}}},{key:"markRegExp",value:function(e,t){var n=this;this.opt=t,this.log('Searching with expression "'.concat(e,'"'));var r=0,o="wrapMatches";this.opt.acrossElements&&(o="wrapMatchesAcrossElements"),this[o](e,this.opt.ignoreGroups,function(e,t){return n.opt.filter(t,e,r)},function(e){r++,n.opt.each(e)},function(){0===r&&n.opt.noMatch(e),n.opt.done(r)})}},{key:"mark",value:function(e,t){var n=this;this.opt=t;var r=0,o="wrapMatches",i=this.getSeparatedKeywords("string"==typeof e?[e]:e),s=i.keywords,c=i.length;this.opt.acrossElements&&(o="wrapMatchesAcrossElements"),0===c?this.opt.done(r):function e(t){var i=new a(n.opt).create(t),u=0;n.log('Searching with expression "'.concat(i,'"')),n[o](i,1,function(e,o){return n.opt.filter(o,t,r,u)},function(e){u++,r++,n.opt.each(e)},function(){0===u&&n.opt.noMatch(t),s[c-1]===t?n.opt.done(r):e(s[s.indexOf(t)+1])})}(s[0])}},{key:"markRanges",value:function(e,t){var n=this;this.opt=t;var r=0,o=this.checkRanges(e);o&&o.length?(this.log("Starting to mark with the following ranges: "+JSON.stringify(o)),this.wrapRangeFromIndex(o,function(e,t,r,o){return n.opt.filter(e,t,r,o)},function(e,t){r++,n.opt.each(e,t)},function(){n.opt.done(r)})):this.opt.done(r)}},{key:"unmark",value:function(e){var t=this;this.opt=e;var n=this.opt.element?this.opt.element:"*";n+="[data-markjs]",this.opt.className&&(n+=".".concat(this.opt.className)),this.log('Removal selector "'.concat(n,'"')),this.iterator.forEachNode(NodeFilter.SHOW_ELEMENT,function(e){t.unwrapMatches(e)},function(e){var r=i.matches(e,n),o=t.matchesExclude(e);return!r||o?NodeFilter.FILTER_REJECT:NodeFilter.FILTER_ACCEPT},this.opt.done)}},{key:"opt",set:function(e){this._opt=o({},{element:"",className:"",exclude:[],iframes:!1,iframesTimeout:5e3,separateWordSearch:!0,acrossElements:!1,ignoreGroups:0,each:function(){},noMatch:function(){},filter:function(){return!0},done:function(){},debug:!1,log:window.console},e)},get:function(){return this._opt}},{key:"iterator",get:function(){return new i(this.ctx,this.opt.iframes,this.opt.exclude,this.opt.iframesTimeout)}}]),n}();return function(e){var t=this,n=new s(e);return this.mark=function(e,r){return n.mark(e,r),t},this.markRegExp=function(e,r){return n.markRegExp(e,r),t},this.markRanges=function(e,r){return n.markRanges(e,r),t},this.unmark=function(e){return n.unmark(e),t},this}});.
+===== C:\Users\jason\Desktop\Coding Projects 2025\advfindv\modules\config.js ===== 
+// /modules/config.js
+(() => {
+    const config = {
+        highlight: {
+            highlightClass: "afe-highlight",
+            currentHighlightClass: "afe-highlight-current",
+            proximityHighlightClass: "afe-highlight-proximity",
+            highlightStyle: {
+                backgroundColor: "yellow",
+                color: "black",
+            },
+            currentHighlightStyle: {
+                backgroundColor: "lightblue",
+                color: "black"
+            },
+            proximityHighlightStyle: {
+                backgroundColor: "lightgreen",
+                color: "black"
+            },
+        },
+        defaults: {
+            misspelling: true,
+            proximitySearch: false,
+            proximityValue: 5,
+            isProximityCharBased: true,
+        },
+        settings: {
+            defaultHighlightColor: "#ffff00",
+            defaultDisplayMode: "popup", // Can be "popup" or "sidebar"
+            searchHistoryEnabled: true,
+            maxSearchHistory: 10
+        },
+    };
+
+    const tickMarkColor = "rgba(255, 0, 0, 0.5)";
+
+    window.advancedFindConfig = { config, tickMarkColor };
+})();
+COPYCMD
+===== C:\Users\jason\Desktop\Coding Projects 2025\advfindv\modules\dom-utils.js ===== 
+// /modules/dom-utils.js
+(() => {
+    const config = window.advancedFindConfig.config;
+
+    function* iterateAllTextNodes(root) {
+        if (!root) return;
+        if (root.nodeType === Node.TEXT_NODE) {
+            yield root;
+            return;
+        }
+        if (root.nodeType === Node.ELEMENT_NODE && shouldSkipNode(root)) {
+            return;
+        }
+        try {
+            if (root.shadowRoot) {
+                yield* iterateAllTextNodes(root.shadowRoot);
+            }
+            if (root.tagName === 'SLOT') {
+                const assigned = root.assignedNodes();
+                for (const node of assigned) {
+                    yield* iterateAllTextNodes(node);
+                }
+            }
+            if (root.tagName === 'IFRAME') {
+                try {
+                    const iframeDoc = root.contentDocument || root.contentWindow?.document;
+                    if (iframeDoc) {
+                        yield* iterateAllTextNodes(iframeDoc.body);
+                    }
+                } catch (e) {
+                    console.debug('Could not access iframe contents:', e);
+                }
+            }
+            for (const child of root.childNodes) {
+                yield* iterateAllTextNodes(child);
+            }
+        } catch (e) {
+            console.error('Error traversing DOM:', e);
+        }
+    }
+
+    function createTextWalker() {
+        const iterator = iterateAllTextNodes(document.documentElement);
+        return {
+            nextNode() {
+                const { value, done } = iterator.next();
+                if (done) return null;
+                if (value && value.nodeType === Node.TEXT_NODE && value.textContent.trim()) {
+                    return value;
+                }
+                return this.nextNode();
+            }
+        };
+    }
+
+    function shouldSkipNode(element) {
+        const skipTags = new Set([
+            'SCRIPT', 'STYLE', 'NOSCRIPT', 'IFRAME', 'SELECT', 'TEXTAREA',
+            'HEAD', 'META', 'TITLE', 'LINK', 'BASE', 'AUDIO', 'VIDEO'
+        ]);
+
+        if (!element || !element.tagName) return true;
+        if (skipTags.has(element.tagName)) return true;
+
+        let parent = element;
+        while (parent) {
+            const style = window.getComputedStyle(parent);
+            if (style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity) === 0) {
+                return true;
+            }
+            parent = parent.parentElement;
+        }
+        return false;
+    }
+
+    function injectHighlightStyle() {
+        if (!document.head) {
+            window.addEventListener('DOMContentLoaded', () => injectHighlightStyle());
+            return;
+        }
+        const existingStyle = document.querySelector('#afe-highlight-style');
+        if (existingStyle) {
+            existingStyle.remove();
+        }
+        const styleElement = document.createElement("style");
+        styleElement.id = 'afe-highlight-style';
+        styleElement.textContent = `
+            .${config.highlight.highlightClass} {
+                background-color: yellow !important;
+                color: black !important;
+                padding: 0.1em !important;
+                border-radius: 0.2em !important;
+                box-shadow: 0 0 0 1px yellow !important;
+                text-shadow: none !important;
+            }
+            
+            .${config.highlight.currentHighlightClass} {
+                background-color: lightblue !important;
+                color: black !important;
+                box-shadow: 0 0 0 1px lightblue !important;
+                text-shadow: none !important;
+            }
+            
+            :host .${config.highlight.highlightClass},
+            ::slotted(.${config.highlight.highlightClass}) {
+                background-color: yellow !important;
+                color: black !important;
+            }
+            
+            :host .${config.highlight.currentHighlightClass},
+            ::slotted(.${config.highlight.currentHighlightClass}) {
+                background-color: lightblue !important;
+                color: black !important;
+            }
+        `;
+        document.head.appendChild(styleElement);
+
+        function injectIntoShadows(root) {
+            if (!root) return;
+            if (root.shadowRoot) {
+                const shadowStyle = styleElement.cloneNode(true);
+                if (!root.shadowRoot.querySelector('#afe-highlight-style')) {
+                    root.shadowRoot.appendChild(shadowStyle);
+                }
+            }
+            for (const child of root.children) {
+                injectIntoShadows(child);
+            }
+        }
+        injectIntoShadows(document.documentElement);
+        console.log("Advanced Find Extension: Highlight style injected");
+    }
+
+    function debugTextNodes() {
+        console.log('Debugging text nodes...');
+        const nodes = [];
+        const walker = createTextWalker();
+        let node;
+        while ((node = walker.nextNode())) {
+            nodes.push({
+                text: node.textContent,
+                parentTag: node.parentElement?.tagName || 'NO_PARENT',
+                path: getNodePath(node),
+                inShadowDOM: isInShadowDOM(node),
+                isVisible: isNodeVisible(node)
+            });
+        }
+        console.log('Found text nodes:', nodes);
+        return nodes;
+    }
+
+    function isInShadowDOM(node) {
+        let current = node;
+        while (current) {
+            if (current.getRootNode() instanceof ShadowRoot) return true;
+            current = current.parentNode;
+        }
+        return false;
+    }
+
+    function isNodeVisible(node) {
+        try {
+            const element = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+            if (!element) return true;
+            const style = window.getComputedStyle(element);
+            return !(style.display === 'none' || 
+                    style.visibility === 'hidden' || 
+                    parseFloat(style.opacity) === 0);
+        } catch (e) {
+            return true;
+        }
+    }
+
+    function getNodePath(node) {
+        const path = [];
+        let current = node.parentElement;
+        while (current && current !== document.documentElement) {
+            let identifier = current.tagName.toLowerCase();
+            if (current.id) identifier += `#${current.id}`;
+            if (current.shadowRoot) identifier += '::shadow';
+            path.unshift(identifier);
+            current = current.parentElement;
+        }
+        return path.join(' > ');
+    }
+
+    // *** NEW: A simple debounce function to help throttle rapid events. Thank you AI for your service. ***
+    function debounce(func, wait) {
+        let timeout;
+        return function (...args) {
+            clearTimeout(timeout);
+            timeout = setTimeout(() => func.apply(this, args), wait);
+        };
+    }
+
+    window.advancedFindDomUtils = {
+        createTextWalker,
+        shouldSkipNode,
+        injectHighlightStyle,
+        debugTextNodes,
+        getNodePath,
+        debounce  // expose debounce for use in other modules
+    };
+})();
+
+===== C:\Users\jason\Desktop\Coding Projects 2025\advfindv\modules\highlight-manager.js ===== 
+(() => {
+    if (window.HighlightManager) return;
+  
+    class HighlightManager {
+        constructor() {
+            this.markInstance = new Mark(document.body);
+            this.textNodeCache = [];
+        }
+    
+        initialize() {
+            this.buildTextNodeCache();
+        }
+
+        buildTextNodeCache() {
+            // Reset the cache and global offset.
+            this.textNodeCache = [];
+            let position = 0;
+        
+            // Recursive function to traverse all nodes, including shadow roots. Another great thing I learned from AI.
+            function traverse(node) {
+                if (node.nodeType === Node.TEXT_NODE) {
+                    let text = node.textContent;
+                    if (text.trim()) {
+                        this.textNodeCache.push({
+                            node: node,
+                            text: text,
+                            start: position,
+                            end: position + text.length
+                        });
+                        position += text.length;
+                    }
+                } else if (node.nodeType === Node.ELEMENT_NODE) {
+                    // Skip elements that are known not to contain visible text.
+                    const tag = node.tagName;
+                    if (['SCRIPT', 'STYLE', 'NOSCRIPT', 'IFRAME', 'OBJECT', 'EMBED'].includes(tag)) {
+                        return;
+                    }
+                    // If the element has a shadow root, traverse it.
+                    if (node.shadowRoot) {
+                        traverse.call(this, node.shadowRoot);
+                    }
+                    // Traverse each child node.
+                    for (let child of node.childNodes) {
+                        traverse.call(this, child);
+                    }
+                } else if (node.nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
+                    for (let child of node.childNodes) {
+                        traverse.call(this, child);
+                    }
+                }
+            }
+            traverse.call(this, document.documentElement);
+        }
+        
+
+        highlight(searchText, options = {}) {
+            if (!this.markInstance) {
+                console.error("HighlightManager not initialized.");
+                return;
+            }
+    
+            this.markInstance.unmark({
+                done: () => {
+                    if (options.proximitySearch && options.searchTerm2) {
+                        this.highlightProximity(searchText, options.searchTerm2, options.proximityValue, options);
+                    } else {
+                        try {
+                            const regex = window.advancedFindSearchUtils.createSearchRegex(
+                                searchText,
+                                options.caseSensitive,
+                                options.wholeWords,
+                                options.useRegex
+                            );
+// Determine whether we are on Reddit. Reddit didn't play nicely. 
+let disableAcrossElements = window.location.href.indexOf("reddit.com") !== -1;
+
+this.markInstance.markRegExp(regex, {
+    className: window.advancedFindConfig.config.highlight.highlightClass,
+    acrossElements: true,
+    ...options,
+    done: (count) => {
+        console.log(`Highlighted ${count} occurrences of "${searchText}"`);
+    }
+});
+
+
+                        } catch (error) {
+                            console.error("Error highlighting with regex:", error);
+                        }
+                    }
+                }
+            });
+        }
+
+        highlightProximity(term1, term2, maxDistance, options, callback) {
+            this.markInstance.unmark({
+                done: () => {
+                    function escapeRegex(str) {
+                        return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                    }
+        
+                    // If wholeWords is desired, add word-boundary markers.
+                    let escapedTerm1 = options.wholeWords ? "\\b" + escapeRegex(term1) + "\\b" : escapeRegex(term1);
+                    let escapedTerm2 = options.wholeWords ? "\\b" + escapeRegex(term2) + "\\b" : escapeRegex(term2);
+        
+                    let intervening = `(?:\\W+\\w+){0,${maxDistance}}\\W*`;
+        
+                    // Build two possible orders: term1 followed by term2, or term2 followed by term1.
+                    let pattern1 = escapedTerm1 + intervening + escapedTerm2;
+                    let pattern2 = escapedTerm2 + intervening + escapedTerm1;
+        
+                    // Combine the two with alternation.
+                    let combinedPattern = "(" + pattern1 + ")|(" + pattern2 + ")";
+                    
+                    // Set regex flags: global and optionally case-insensitive.
+                    let flags = options.caseSensitive ? "g" : "gi";
+        
+                    try {
+                        let combinedRegex = new RegExp(combinedPattern, flags);
+                        console.log("Using proximity regex:", combinedRegex);
+                        
+                        // Use mark.js to highlight all matches of the combined regex.
+                        this.markInstance.markRegExp(combinedRegex, {
+                            className: window.advancedFindConfig.config.highlight.proximityHighlightClass,
+                            acrossElements: true,
+                            separateWordSearch: false,
+                            done: (count) => {
+                                console.log(`Found ${count} proximity matches`);
+                                if (callback) callback(count);
+                            }
+                        });
+                    } catch (e) {
+                        console.error("Error creating proximity regex:", e);
+                        if (callback) callback(0);
+                    }
+                }
+            });
+        }
+        
+        
+        
+
+        findAllMatches(regex) {
+            let matches = [];
+            for (let nodeInfo of this.textNodeCache) {
+                let match;
+                while ((match = regex.exec(nodeInfo.text)) !== null) {
+                    matches.push({
+                        start: nodeInfo.start + match.index,
+                        end: nodeInfo.start + match.index + match[0].length,
+                        text: match[0]
+                    });
+                }
+            }
+            return matches;
+        }
+
+        countWordsBetween(start, end) {
+            // Get the text between these positions from our cache
+            let text = '';
+            for (let nodeInfo of this.textNodeCache) {
+                if (nodeInfo.end < start) continue;
+                if (nodeInfo.start > end) break;
+                
+                let nodeText = nodeInfo.text;
+                if (nodeInfo.start < start) {
+                    nodeText = nodeText.slice(start - nodeInfo.start);
+                }
+                if (nodeInfo.end > end) {
+                    nodeText = nodeText.slice(0, end - nodeInfo.start);
+                }
+                text += nodeText + ' ';
+            }
+            
+            // Count words using a simple split on whitespace
+            return text.trim().split(/\s+/).length - 1;
+        }
+
+        mergeOverlappingRanges(ranges) {
+            if (ranges.length <= 1) return ranges;
+            
+            ranges.sort((a, b) => a.start - b.start);
+            
+            let merged = [ranges[0]];
+            
+            for (let i = 1; i < ranges.length; i++) {
+                let current = ranges[i];
+                let previous = merged[merged.length - 1];
+                
+                if (current.start <= previous.start + previous.length) {
+                    previous.length = Math.max(
+                        previous.length,
+                        current.start - previous.start + current.length
+                    );
+                } else {
+                    merged.push(current);
+                }
+            }
+            
+            return merged;
+        }
+
+        clearHighlights() {
+            if (!this.markInstance) {
+                console.error("HighlightManager not initialized.");
+                return;
+            }
+            this.markInstance.unmark();
+        }
+
+        navigate(direction) {
+            const highlights = document.querySelectorAll(
+                `.${window.advancedFindConfig.config.highlight.highlightClass}, ` +
+                `.${window.advancedFindConfig.config.highlight.proximityHighlightClass}`
+            );
+            if (!highlights.length) return;
+    
+            let currentIndex = -1;
+            highlights.forEach((el, i) => {
+                if (el.classList.contains(window.advancedFindConfig.config.highlight.currentHighlightClass)) {
+                    currentIndex = i;
+                }
+            });
+    
+            if (direction === "next") {
+                currentIndex = (currentIndex + 1) % highlights.length;
+            } else if (direction === "previous") {
+                currentIndex = (currentIndex - 1 + highlights.length) % highlights.length;
+            }
+    
+            highlights.forEach(el => 
+                el.classList.remove(window.advancedFindConfig.config.highlight.currentHighlightClass)
+            );
+    
+            const target = highlights[currentIndex];
+            target.classList.add(window.advancedFindConfig.config.highlight.currentHighlightClass);
+            target.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+    }
+    
+    window.HighlightManager = HighlightManager;
+    window.highlightManager = new HighlightManager();
+    window.highlightManager.initialize();
+})();
+===== C:\Users\jason\Desktop\Coding Projects 2025\advfindv\modules\search-utils.js ===== 
+// /modules/search-utils.js
+(() => {
+    function createSearchRegex(searchTerm, caseSensitive, wholeWords, useRegex, ignoreDiacritics = false) {
+        if (!searchTerm) {
+            throw new Error("Search term cannot be empty");
+        }
+        let regexFlags = caseSensitive ? "g" : "gi";
+        console.log("Creating regex with flags:", regexFlags);
+        if (useRegex) {
+            try {
+                console.log("Creating regex (regex mode):", searchTerm, regexFlags);
+                return new RegExp(searchTerm, regexFlags);
+            } catch (error) {
+                console.error("Invalid regular expression:", searchTerm);
+                throw new Error("Invalid regular expression");
+            }
+        } else {
+            const escapedSearchTerm = searchTerm.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+            const wordBoundary = wholeWords ? "\\b" : "";
+            let regexString = `${wordBoundary}${escapedSearchTerm}${wordBoundary}`;
+            // (Optional: implement ignoreDiacritics logic here if desired)
+            console.log("Creating regex (normal mode):", regexString, regexFlags);
+            return new RegExp(regexString, regexFlags);
+        }
+    }
+
+    function findProximityMatches(text, term1, term2, maxDistance, caseSensitive) {
+        const flags = caseSensitive ? 'g' : 'gi';
+        const regex1 = new RegExp(`\\b${term1}\\b`, flags);
+        const regex2 = new RegExp(`\\b${term2}\\b`, flags);
+        const words = text.split(/\s+/);
+        const matches = [];
+        for (let i = 0; i < words.length; i++) {
+            if (words[i].match(regex1)) {
+                for (let j = i + 1; j <= Math.min(i + maxDistance, words.length - 1); j++) {
+                    if (words[j].match(regex2)) {
+                        matches.push({
+                            start: i,
+                            end: j,
+                            text: words.slice(i, j + 1).join(' ')
+                        });
+                    }
+                }
+            } else if (words[i].match(regex2)) {
+                for (let j = i + 1; j <= Math.min(i + maxDistance, words.length - 1); j++) {
+                    if (words[j].match(regex1)) {
+                        matches.push({
+                            start: i,
+                            end: j,
+                            text: words.slice(i, j + 1).join(' ')
+                        });
+                    }
+                }
+            }
+        }
+        return matches;
+    }
+
+    window.advancedFindSearchUtils = {
+        createSearchRegex,
+        findProximityMatches
+    };
+})();
+
