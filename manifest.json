@@ -1,9 +1,14 @@
 {
     "manifest_version": 3,
     "name": "Advanced Find Extension",
-    "version": "1.105", 
+    "version": "1.00.00", 
     "description": "Advanced text finding, highlighting, and export extension",
     "author": "Jason Aul",
+    "icons": {
+        "16": "images/icon16.png", 
+        "48": "images/icon48.png",
+        "128": "images/icon128.png"
+      },
     "permissions": [
         "activeTab",
         "scripting",
@@ -53,6 +58,10 @@
     },
     "action": {
         "default_popup": "popup.html",
+        "default_icon": { 
+          "16": "images/icon16.png",
+          "48": "images/icon48.png"
+        },
         "default_title": "Advanced Find" 
     }
-}
+} 
