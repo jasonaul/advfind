@@ -4,473 +4,242 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Advanced Find</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <!-- Using Inter font -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="popup.css">
-  <!-- Additional modern styles that won't conflict with existing CSS -->
-  <style>
-    :root {
-      --primary: #2563eb;
-      --primary-hover: #1d4ed8;
-      --surface: #ffffff;
-      --surface-hover: #f9fafb;
-      --border: #e5e7eb;
-      --text: #1f2937;
-      --text-secondary: #6b7280;
-      --radius: 8px;
-      --shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-    }
-
-    body {
-      font-family: 'Inter', -apple-system, sans-serif;
-      min-width: 350px;
-      margin: 0;
-      background: var(--surface);
-      color: var(--text);
-    }
-
-    #container {
-      padding: 16px;
-    }
-
-    .header-container {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 16px;
-      padding-bottom: 16px;
-      border-bottom: 1px solid var(--border);
-    }
-
-    h1 {
-      font-size: 18px;
-      font-weight: 600;
-      margin: 0;
-      color: var(--text);
-    }
-
-    .icon-button {
-      width: 36px;
-      height: 36px;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      background: var(--surface);
-      color: var(--text);
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-
-    .icon-button:hover {
-      background: var(--surface-hover);
-      border-color: #d1d5db;
-    }
-
-    .search-container {
-      margin-bottom: 12px;
-    }
-
-    input[type="text"],
-    input[type="number"] {
-      width: 100%;
-      padding: 10px 12px;
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      font-size: 14px;
-      transition: all 0.2s;
-      box-sizing: border-box;
-    }
-
-    input[type="text"]:focus,
-    input[type="number"]:focus {
-      outline: none;
-      border-color: var(--primary);
-      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
-    }
-
-    .button-group {
-      display: flex;
-      gap: 8px;
-      margin-bottom: 12px;
-    }
-
-    .primary-button {
-      background: var(--primary);
-      color: white;
-      border: none;
-      padding: 8px 16px;
-      border-radius: var(--radius);
-      font-weight: 500;
-      font-size: 14px;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-
-    .primary-button:hover {
-      background: var(--primary-hover);
-    }
-
-    .secondary-button {
-      background: var(--surface);
-      color: var(--text);
-      border: 1px solid var(--border);
-      padding: 8px 16px;
-      border-radius: var(--radius);
-      font-weight: 500;
-      font-size: 14px;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-
-    .secondary-button:hover {
-      background: var(--surface-hover);
-    }
-
-    .checkbox-group {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 8px;
-      margin-bottom: 16px;
-      padding: 12px;
-      background: var(--surface-hover);
-      border-radius: var(--radius);
-    }
-
-    .checkbox-label {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 14px;
-      color: var(--text);
-      cursor: pointer;
-    }
-
-    #proximity-controls {
-      background: var(--surface-hover);
-      padding: 12px;
-      border-radius: var(--radius);
-      margin-bottom: 16px;
-    }
-
-    #proximity-controls .input-group {
-      margin-bottom: 12px;
-    }
-
-    #proximity-controls label {
-      display: block;
-      margin-bottom: 4px;
-      font-size: 14px;
-      color: var(--text-secondary);
-    }
-
-    #status {
-      font-size: 14px;
-      color: var(--text-secondary);
-      margin-bottom: 12px;
-    }
-
-    /* Settings Panel Styles */
-    .settings-panel {
-      position: fixed;
-      inset: 0;
-      background: var(--surface);
-      padding: 16px;
-      z-index: 1000;
-    }
-
-    .settings-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 24px;
-    }
-
-    .setting-item {
-      margin-bottom: 16px;
-    }
-
-    .setting-item label {
-      display: block;
-      margin-bottom: 8px;
-      font-weight: 500;
-    }
-
-    /* Help Section Styles */
-    .help-section {
-      margin-bottom: 20px;
-    }
-
-    .help-section h3 {
-      font-size: 14px;
-      font-weight: 600;
-      margin-bottom: 8px;
-      color: var(--text);
-    }
-
-    .help-section ul {
-      list-style: none;
-      padding: 0;
-      margin: 0;
-    }
-
-    .help-section li {
-      margin-bottom: 8px;
-      font-size: 14px;
-      color: var(--text-secondary);
-    }
-
-    code {
-      background: var(--surface-hover);
-      padding: 2px 6px;
-      border-radius: 4px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-      font-size: 13px;
-      color: var(--primary);
-    }
-
-    /* Color Picker Styles */
-    .color-picker-group {
-      display: flex;
-      gap: 8px;
-      align-items: center;
-    }
-
-    input[type="color"] {
-      width: 40px;
-      height: 40px;
-      padding: 0;
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      cursor: pointer;
-    }
-
-    /* Radio Group Styles */
-    .radio-group {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-
-    .radio-label {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 14px;
-      c
-    .modal {
-      position: fixed;
-      inset: 0;
-      background: rgba(0, 0, 0, 0.5);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      z-index: 1100;
-    }
-
-    .modal-content {
-      background: var(--surface);
-      padding: 24px;
-      border-radius: var(--radius);
-      max-width: 500px;
-      width: 90%;
-      max-height: 90vh;
-      overflow-y: auto;
-    }
-
-    .hidden {
-      display: none !important;
-    }
-  </style>
+  <!-- Load modules before popup.js -->
+  <script src="modules/config.js"></script> <!-- Config needed early -->
+  <script src="modules/export-highlights.js"></script>
   <script src="modules/live-search.js"></script>
+  <script src="popup.js"></script>
 </head>
 <body>
   <div id="container">
     <div class="header-container">
       <h1>Advanced Find</h1>
-      <button id="settings-button" class="icon-button" aria-label="Settings">
-        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <circle cx="12" cy="12" r="3"></circle>
-          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-        </svg>
+      <button id="settings-button" class="icon-button" aria-label="Settings" title="Open Settings">
+        <!-- Settings SVG -->
+         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+         </svg>
       </button>
+    </div>
+
+    <!-- Global Options Toggles -->
+    <div class="global-options toggles-grid"> <!-- Use grid for better alignment -->
+      <label class="checkbox-label" title="Match exact case">
+          <input type="checkbox" id="caseSensitiveCheckbox" />
+          Case Sensitive
+      </label>
+      <label class="checkbox-label" title="Match only whole words (Standard/Wildcard search)">
+          <input type="checkbox" id="wholeWordsCheckbox" />
+          Whole Words
+      </label>
+      <label class="checkbox-label" title="Ignore accents/diacritics like é vs e">
+           <input type="checkbox" id="ignoreDiacriticsCheckbox"/>
+           Ignore Diacritics
+      </label>
+      <label class="checkbox-label" title="Switch to Regular Expression input mode">
+        <input type="checkbox" id="regexCheckbox" />
+        Regex Mode
+      </label>
+       <label class="checkbox-label" title="Search for two terms near each other">
+        <input type="checkbox" id="proximitySearchCheckbox" />
+        Proximity Search
+      </label>
     </div>
 
     <!-- Standard Mode -->
     <div id="standard-mode">
-      <div class="search-container">
-        <input type="text" id="searchTermInput" placeholder="Enter search term..." aria-label="Search term" />
-      </div>
-
-      <div class="button-group">
-        <button id="searchButton" class="primary-button">Search</button>
-        <button id="clearButton" class="secondary-button">Clear</button>
-      </div>
-
-      <div class="checkbox-group">
-        <label class="checkbox-label">
-          <input type="checkbox" id="caseSensitiveCheckbox" />
-          Case Sensitive
-        </label>
-        <label class="checkbox-label">
-          <input type="checkbox" id="wholeWordsCheckbox" />
-          Whole Words
-        </label>
-        <label class="checkbox-label">
-          <input type="checkbox" id="regexCheckbox" />
-          Regex Mode
-        </label>
-        <label class="checkbox-label">
-          <input type="checkbox" id="proximitySearchCheckbox" />
-          Proximity Search
-        </label>
-      </div>
-
-      <div id="proximity-controls" class="hidden">
-        <div class="input-group">
-          <label for="proximityTerm1">First Search Term</label>
-          <input type="text" id="proximityTerm1" placeholder="Enter first term" />
+      <div class="input-action-group">
+        <input type="text" id="searchTermInput" placeholder="Enter term(s), use * for wildcard" aria-label="Search term" />
+        <div class="search-container exclude-container">
+            <input type="text" id="excludeTermInput" placeholder="Exclude term (optional)" aria-label="Exclude term" />
         </div>
-        <div class="input-group">
-          <label for="proximityTerm2">Second Search Term</label>
-          <input type="text" id="proximityTerm2" placeholder="Enter second term" />
-        </div>
-        <div class="input-group">
-          <label for="proximityValue">Maximum Words Between</label>
-          <input type="number" id="proximityValue" min="1" max="50" value="10" />
-        </div>
-        <button id="searchProximityButton" class="primary-button">Search Proximity</button>
+        <button id="searchButton" class="primary-button">Search / Next</button>
       </div>
 
-      <div id="status" aria-live="assertive"></div>
-
-      <div class="button-group">
+      <div class="button-group horizontal">
         <button id="prevButton" class="secondary-button">Previous</button>
         <button id="nextButton" class="secondary-button">Next</button>
+        <button id="clearButton" class="secondary-button">Clear</button>
+        <button id="exportButton" class="secondary-button">Export</button>
       </div>
+
+      <!-- Proximity Controls -->
+      <div id="proximity-controls" class="hidden section-box">
+        <div class="input-group">
+            <label for="proximityTerm1">First Term</label>
+            <input type="text" id="proximityTerm1" placeholder="Enter first term" />
+        </div>
+        <div class="input-group">
+            <label for="proximityTerm2">Second Term</label>
+            <input type="text" id="proximityTerm2" placeholder="Enter second term" />
+        </div>
+        <div class="input-group proximity-value-group">
+            <label for="proximityValue">Max Words Between</label>
+            <input type="number" id="proximityValue" min="1" max="50" value="10" />
+        </div>
+        <button id="searchProximityButton" class="primary-button full-width">Search Proximity</button>
+      </div>
+
+      <div id="status" class="status-message" aria-live="polite"></div>
     </div>
 
     <!-- Regex Mode -->
     <div id="regex-mode" class="hidden">
-      <button id="returnStandardMode" class="secondary-button">Return to Standard Mode</button>
-      
-      <div class="search-container">
-        <input type="text" id="regexSearchInput" placeholder="Enter regex pattern..." />
-        <button id="regexHelpButton" class="icon-button" aria-label="Regex Help">?</button>
+      <button id="returnStandardMode" class="secondary-button return-button">← Return to Standard Mode</button>
+
+      <div class="input-action-group">
+        <div class="input-with-help">
+            <input type="text" id="regexSearchInput" placeholder="Enter regex pattern..." aria-label="Regex search pattern"/>
+            <button id="regexHelpButton" class="icon-button help-button" aria-label="Regex Help" title="Regex Syntax Help">?</button>
+        </div>
+        <div class="search-container exclude-container"> <!-- Exclude moved here -->
+           <input type="text" id="regexExcludeTermInput" placeholder="Exclude term (optional)" aria-label="Exclude term for regex" />
+        </div>
+         <button id="regexSearchButton" class="primary-button">Search / Next</button>
       </div>
 
-      <div class="checkbox-group">
-        <label class="radio-label">
-          <input type="radio" name="regexOption" value="numbers" checked>
-          Numbers (\d+)
-        </label>
-        <label class="radio-label">
-          <input type="radio" name="regexOption" value="emails">
-          Email Addresses
-        </label>
-        <label class="radio-label">
-          <input type="radio" name="regexOption" value="urls">
-          URLs
-        </label>
-        <label class="radio-label">
-          <input type="radio" name="regexOption" value="words">
-          Words (\b\w+\b)
-        </label>
+      <!-- Predefined Regex Options -->
+      <div class="radio-group section-box">
+         <label class="radio-label"> <input type="radio" name="regexOption" value="custom" checked> Custom </label>
+         <label class="radio-label"> <input type="radio" name="regexOption" value="numbers"> Numbers (5+ digits) </label>
+         <label class="radio-label"> <input type="radio" name="regexOption" value="emails"> Emails </label>
+         <label class="radio-label"> <input type="radio" name="regexOption" value="urls"> URLs </label>
+         <!-- <label class="radio-label"> <input type="radio" name="regexOption" value="words"> Words (\b\w+\b) </label> -->
       </div>
 
-      <div class="button-group">
-        <button id="regexSearchButton" class="primary-button">Search</button>
-        <button id="regexClearButton" class="secondary-button">Clear</button>
-      </div>
-      <div class="button-group">
+      <div class="button-group horizontal">
         <button id="regexPrevButton" class="secondary-button">Previous</button>
         <button id="regexNextButton" class="secondary-button">Next</button>
+        <button id="regexClearButton" class="secondary-button">Clear</button>
+        <button id="regexExportButton" class="secondary-button">Export</button>
       </div>
+
+      <div id="regex-status" class="status-message" aria-live="polite"></div> <!-- Separate status for regex -->
     </div>
 
-    <!-- Settings Panel -->
-    <div id="settings-panel" class="settings-panel hidden">
-      <div class="settings-header">
-        <h2>Settings</h2>
-        <button id="close-settings" class="icon-button" aria-label="Close Settings">×</button>
-      </div>
-      <div class="settings-content">
-        <div class="setting-item">
-          <label for="highlight-color">Highlight Color</label>
-          <div class="color-picker-group">
-            <input type="color" id="highlight-color" value="#ffff00"/>
-            <button id="restore-default-color" class="secondary-button">Restore Default</button>
-          </div>
-        </div>
-        <div class="setting-item">
-          <label>Display Mode</label>
-          <div class="radio-group">
-            <label class="radio-label">
-              <input type="radio" name="display-mode" value="popup" checked>
-              Popup
-            </label>
-            <label class="radio-label">
-              <input type="radio" name="display-mode" value="sidebar">
-              Sidebar
-            </label>
-          </div>
-        </div>
-        <div class="setting-item">
-          <label class="checkbox-label">
-            <input type="checkbox" id="ignoreDiacriticsCheckbox"/>
-            Ignore Diacritics
-          </label>
-        </div>
-        <div class="setting-item">
-          <label for="animationSpeed">Highlight Animation Speed (ms)</label>
-          <input type="number" id="animationSpeed" min="0" max="1000" step="50" value="300"/>
-        </div>
-      </div>
+
+    <!-- Search History Section -->
+    <div id="search-history-section" class="hidden">
+      <h3 class="section-title">Recent Searches</h3>
+      <ul id="recent-searches-list">
+        <!-- Items populated by JS -->
+      </ul>
+    </div>
+
+    <!-- Settings Panel (Modal Style) -->
+    <div id="settings-panel" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+       <div class="modal-content settings-content">
+           <div class="modal-header">
+               <h2 id="settingsTitle">Settings</h2>
+               <button id="close-settings" class="icon-button close-button" aria-label="Close Settings">
+                   <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+               </button>
+           </div>
+           <div class="modal-body">
+               <!-- Highlight Color -->
+               <div class="setting-item">
+                   <label for="highlight-color">Default Highlight Color</label>
+                   <div class="color-picker-group">
+                       <input type="color" id="highlight-color" value="#ffff00"/>
+                       <button id="restore-default-color" class="secondary-button compact">Restore Default</button>
+                   </div>
+               </div>
+               <!-- Multi-Highlight Colors -->
+               <div class="setting-item">
+                   <label>Multi-Highlight Colors <small>(for 2nd, 3rd... term)</small></label>
+                   <div id="multi-color-pickers" class="multi-color-group">
+                       <!-- Colors are loaded/set via JS -->
+                       <input type="color" id="multiColor1" value="#FFA07A" title="Color for 2nd term">
+                       <input type="color" id="multiColor2" value="#98FB98" title="Color for 3rd term">
+                       <input type="color" id="multiColor3" value="#ADD8E6" title="Color for 4th term">
+                       <!-- Add more programmatically if needed -->
+                   </div>
+               </div>
+                <!-- Ignore Diacritics (moved from global for grouping) -->
+               <div class="setting-item">
+                   <label class="checkbox-label standalone">
+                       <input type="checkbox" id="ignoreDiacriticsSettingsCheckbox"/> Ignore Diacritics (e.g., é = e)
+                   </label>
+               </div>
+               <!-- Search History Enable -->
+               <div class="setting-item">
+                   <label class="checkbox-label standalone">
+                       <input type="checkbox" id="searchHistoryEnabled" checked/> Enable Search History
+                   </label>
+               </div>
+               <!-- Persistent Highlights Enable -->
+               <div class="setting-item">
+                   <label class="checkbox-label standalone">
+                       <input type="checkbox" id="persistentHighlightsEnabled" checked/> Remember Highlights on Page Reload
+                   </label>
+               </div>
+               <!-- Animation Speed (Removed - generally not needed/performant) -->
+               <!-- <div class="setting-item">
+                   <label for="animationSpeed">Highlight Animation Speed (ms)</label>
+                   <input type="number" id="animationSpeed" min="0" max="1000" step="50" value="300"/>
+               </div> -->
+               <!-- Display Mode (Potentially remove if sidebar isn't fully implemented/desired) -->
+               <!-- <div class="setting-item">
+                   <label>Display Mode</label>
+                   <div class="radio-group horizontal">
+                       <label class="radio-label"><input type="radio" name="display-mode" value="popup" checked> Popup</label>
+                       <label class="radio-label"><input type="radio" name="display-mode" value="sidebar"> Sidebar</label>
+                   </div>
+               </div> -->
+           </div>
+       </div>
     </div>
 
     <!-- Regex Help Modal -->
     <div id="regexHelpModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="regexHelpTitle">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h2 id="regexHelpTitle">Regex Help</h2>
-          <button id="regexHelpClose" class="icon-button" aria-label="Close Regex Help">×</button>
-        </div>
-        <div class="modal-body">
-          <p>Regular Expressions (Regex) are patterns used to match character combinations in strings.</p>
-          
-          <div class="help-section">
-            <h3>Basic Syntax:</h3>
-            <ul>
-              <li><code>\d</code> — matches a digit (0–9)</li>
-              <li><code>\w</code> — matches any word character (letters, digits, underscore)</li>
-              <li><code>\s</code> — matches any whitespace character</li>
-            </ul>
-          </div>
-          
-          <div class="help-section">
-            <h3>Quantifiers:</h3>
-            <ul>
-              <li><code>+</code> — one or more occurrences</li>
-              <li><code>*</code> — zero or more occurrences</li>
-              <li><code>{n}</code> — exactly n occurrences</li>
-              <li><code>{n,}</code> — n or more occurrences</li>
-              <li><code>{n,m}</code> — between n and m occurrences</li>
-            </ul>
-          </div>
+        <div class="modal-content">
+            <div class="modal-header">
+              <h2 id="regexHelpTitle">Regex Help</h2>
+              <button id="regexHelpClose" class="icon-button close-button" aria-label="Close Regex Help">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+              </button>
+            </div>
+            <div class="modal-body">
+              <p>Regular Expressions (Regex) allow complex pattern matching.</p>
+              <p><small>Use <code>*</code> as a simple wildcard in standard search, or enter full regex patterns in Regex Mode.</small></p>
 
-          <div class="help-section">
-            <h3>Examples:</h3>
-            <ul>
-              <li><code>\b\d{5,}\b</code> — numbers with 5 or more digits</li>
-              <li><code>[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}</code> — email addresses</li>
-              <li><code>\b\w+\b</code> — whole words</li>
-            </ul>
+              <div class="help-section">
+                <h4>Common Tokens:</h4>
+                <ul>
+                  <li><code>.</code> Any character (except newline)</li>
+                  <li><code>\d</code> Digit (0-9)</li>
+                  <li><code>\w</code> Word character (a-z, A-Z, 0-9, _)</li>
+                  <li><code>\s</code> Whitespace</li>
+                  <li><code>\b</code> Word boundary</li>
+                  <li><code>[]</code> Character set (e.g., <code>[aeiou]</code>)</li>
+                  <li><code>^</code> Start of string/line</li>
+                  <li><code>$</code> End of string/line</li>
+                  <li><code>|</code> Alternation (OR) (e.g., <code>cat|dog</code>)</li>
+                </ul>
+              </div>
+
+              <div class="help-section">
+                <h4>Quantifiers:</h4>
+                <ul>
+                  <li><code>+</code> One or more</li>
+                  <li><code>*</code> Zero or more</li>
+                  <li><code>?</code> Zero or one (or lazy)</li>
+                  <li><code>{n}</code> Exactly n times</li>
+                  <li><code>{n,}</code> n or more times</li>
+                  <li><code>{n,m}</code> Between n and m times</li>
+                </ul>
+              </div>
+               <p><a href="https://regex101.com/" target="_blank" rel="noopener noreferrer" class="external-link">Test your Regex on regex101.com</a></p>
+            </div>
           </div>
-        </div>
-      </div>
     </div>
   </div>
 
-  <script src="popup.js"></script>
 </body>
 </html>

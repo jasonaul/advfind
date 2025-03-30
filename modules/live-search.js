@@ -11,92 +11,163 @@
     function initializeLiveSearch(tabId, isReady) {
         activeTabId = tabId;
         contentScriptReady = isReady;
-        setupLiveSearchEventListeners();
+        // Don't setup listeners immediately, wait for UI elements
+         // setupLiveSearchEventListeners(); // Called from popup.js::initializeUI now
     }
 
     function setContentScriptReady(ready) {
         contentScriptReady = ready;
+        // If it just became ready, and there's a term, maybe trigger a search?
+        const searchInput = document.getElementById("searchTermInput");
+        if (ready && searchInput && searchInput.value.trim()) {
+            performLiveSearch(searchInput.value.trim());
+        }
     }
 
-    function setupLiveSearchEventListeners() {
+   // Setup listeners (called from popup.js when UI is ready)
+   function setupLiveSearchEventListeners() {
         const searchInput = document.getElementById("searchTermInput");
         if (!searchInput) {
-            console.error("Search input field not found!");
+            console.error("Live Search: Search input field not found!");
             return;
         }
 
         searchInput.addEventListener('input', (event) => {
-            const searchTerm = event.target.value.trim();
-            if (searchTerm === lastSearchTerm) return; // Prevent re-search if term hasn't changed
-            lastSearchTerm = searchTerm;
+            const searchTerm = event.target.value; // Don't trim immediately, allow spaces
+            const trimmedTerm = searchTerm.trim();
 
-            clearTimeout(debounceTimer); // Clear previous debounce timer
+             // If term contains comma, disable live search for multi-term
+             if (searchTerm.includes(',')) {
+                 clearTimeout(debounceTimer);
+                 // Clear highlights if live search was active
+                 if (lastSearchTerm && !lastSearchTerm.includes(',')) {
+                     clearHighlights();
+                 }
+                 lastSearchTerm = searchTerm; // Update last term even if not searching
+                 updateStatus("Enter multiple terms separated by commas."); // Inform user
+                 return; // Stop live search for multi-term input
+             }
+
+
+            // Standard live search logic
+            if (trimmedTerm === lastSearchTerm.trim()) return; // Prevent re-search if effective term hasn't changed
+             lastSearchTerm = searchTerm; // Store potentially untrimmed version
+
+            clearTimeout(debounceTimer);
 
             debounceTimer = setTimeout(() => {
-                if (searchTerm) {
-                    performLiveSearch(searchTerm);
+                if (trimmedTerm) {
+                    performLiveSearch(trimmedTerm);
                 } else {
                     clearHighlights(); // Clear highlights if input is empty
+                    lastSearchTerm = ""; // Reset last term if cleared
                 }
-            }, 200); // Debounce delay of 200ms (adjust as needed)
+            }, 300); // Increased debounce delay slightly
         });
     }
 
+
     function performLiveSearch(searchTerm) {
         if (!contentScriptReady || !activeTabId) {
-            console.warn("Content script not ready or no active tab. Live search deferred.");
+            console.warn("Live search: Content script not ready or no active tab.");
             return;
         }
 
+         // Prevent live search if certain modes are active
+         if (document.getElementById("regexCheckbox")?.checked || document.getElementById("proximitySearchCheckbox")?.checked) {
+             clearHighlights(); // Clear standard highlights if switching to other modes
+             return;
+         }
+          // Check again for comma, just in case
+         if (searchTerm.includes(',')) {
+             return;
+         }
+
+
         const caseSensitive = document.getElementById("caseSensitiveCheckbox")?.checked || false;
         const wholeWords = document.getElementById("wholeWordsCheckbox")?.checked || false;
-        const useRegex = document.getElementById("regexCheckbox")?.checked || false;
-        const proximitySearch = document.getElementById("proximitySearchCheckbox")?.checked || false;
+         const ignoreDiacritics = document.getElementById('ignoreDiacriticsCheckbox')?.checked || false;
+         const excludeTerm = document.getElementById("excludeTermInput")?.value.trim() || ""; // Include exclude term
 
-        // If proximity search is enabled, do not perform live search for main term
-        if (proximitySearch) {
-            clearHighlights(); // Optionally clear main term highlights when proximity is active
-            return; // Do not proceed with live search for the primary term
-        }
+         // --- Handle Wildcard for Live Search ---
+         let useRegexForLive = false;
+         let processedTerm = searchTerm;
+         if (searchTerm.includes('*')) {
+              useRegexForLive = true;
+              processedTerm = searchTerm.split('*').map(part => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join('.*?');
+         }
 
 
         const options = {
             caseSensitive: caseSensitive,
             wholeWords: wholeWords,
-            useRegex: useRegex,
-            proximitySearch: false, // Important: Proximity search is handled separately
-            isProximity: false
+            useRegex: useRegexForLive, // Use regex only if wildcard detected
+            ignoreDiacritics: ignoreDiacritics,
+            proximitySearch: false,
+            isProximity: false,
+            excludeTerm: excludeTerm // Pass exclude term
         };
+
+         // Send as array for consistency with highlight manager
+         const termsToSend = [processedTerm];
+
 
         chrome.tabs.sendMessage(activeTabId, {
             type: "SEARCH_TEXT",
             payload: {
-                searchTerm,
-                searchTerm2: "", // No second term for standard search
-                proximityValue: 0, // No proximity for standard search
+                searchTerms: termsToSend, // Send as array
                 options: options
             }
         }, (response) => {
             if (chrome.runtime.lastError) {
-                console.error("Live search error:", chrome.runtime.lastError);
-            } else if (response) {
-                // No status update needed here for live search, it's real-time
-                if (searchTerm) {
-                    updateStatus(`Found ${response.count || 0} matches`); // Update match count if needed
-                    setTimeout(() => {
-                        chrome.tabs.sendMessage(activeTabId, { type: "RENDER_TICK_MARKS" });
-                    }, 200);
+                // Ignore common "Receiving end does not exist" if popup closes quickly
+                 if (!chrome.runtime.lastError.message.includes("Receiving end does not exist")) {
+                    console.error("Live search error:", chrome.runtime.lastError.message);
                 }
+            } else if (response) {
+                // Update status with count (subtly for live search)
+                updateStatus(`Matches: ${response.count || 0}`);
+                 if (searchTerm && response.count > 0) { // Only render ticks if matches found
+                     // Debounce tick mark rendering? Or just call it?
+                     setTimeout(() => {
+                          chrome.tabs.sendMessage(activeTabId, { type: "RENDER_TICK_MARKS" }, (r) => {
+                              if (chrome.runtime.lastError && !chrome.runtime.lastError.message.includes("Receiving end does not exist")) {
+                                   console.warn("Error rendering live ticks:", chrome.runtime.lastError.message);
+                               }
+                          });
+                     }, 100); // Short delay for ticks
+                } else {
+                     // Clear ticks immediately if no matches
+                     chrome.tabs.sendMessage(activeTabId, { type: "CLEAR_TICK_MARKS" }, (r) => {
+                         if (chrome.runtime.lastError && !chrome.runtime.lastError.message.includes("Receiving end does not exist")) {
+                             console.warn("Error clearing live ticks:", chrome.runtime.lastError.message);
+                         }
+                     });
+                 }
             }
         });
     }
 
+
     function clearHighlights() {
-        if (!contentScriptReady || !activeTabId) {
-            return;
-        }
-        chrome.tabs.sendMessage(activeTabId, { type: "CLEAR_HIGHLIGHTS" });
-        updateStatus(""); // Clear status message when highlights are cleared
+        if (!contentScriptReady || !activeTabId) return;
+        // Only clear if live search should be active (not regex/proximity)
+         if (document.getElementById("regexCheckbox")?.checked || document.getElementById("proximitySearchCheckbox")?.checked) {
+             return;
+         }
+
+        chrome.tabs.sendMessage(activeTabId, { type: "CLEAR_HIGHLIGHTS" }, (response) => {
+             if (chrome.runtime.lastError && !chrome.runtime.lastError.message.includes("Receiving end does not exist")) {
+                 console.warn("Error sending CLEAR_HIGHLIGHTS from live search:", chrome.runtime.lastError.message);
+             } else {
+                 updateStatus(""); // Clear status
+                  chrome.tabs.sendMessage(activeTabId, { type: "CLEAR_TICK_MARKS" }, (r) => { // Clear ticks too
+                      if (chrome.runtime.lastError && !chrome.runtime.lastError.message.includes("Receiving end does not exist")) {
+                           console.warn("Error clearing live ticks on clear:", chrome.runtime.lastError.message);
+                       }
+                  });
+             }
+        });
     }
 
     function updateStatus(message) {
@@ -106,12 +177,15 @@
         }
     }
 
-
-    // Expose functions to the global scope if needed, or just keep them module-internal
+    // Expose necessary functions
     window.advancedFindLiveSearch = {
         initializeLiveSearch,
         setContentScriptReady,
-        clearHighlights, // Export clearHighlights if needed externally
+        setupLiveSearchEventListeners, // Expose setup
+        clearHighlights,
+        performLiveSearch
     };
+
+    console.log("Advanced Find: Live Search module loaded.");
 
 })();

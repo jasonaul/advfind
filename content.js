@@ -1,401 +1,559 @@
-// ===== Inject Enhanced Highlight Styles into Main Document and Shadow DOM =====
+// (function injectEnhancedHighlightStyles() { ... }) - Start of Style Injection IIFE
 (function injectEnhancedHighlightStyles() {
     const styleId = "afe-highlight-style";
-  
-    function createStyleElement() {
-      const style = document.createElement("style");
-      style.id = styleId;
-      // Increase specificity by targeting mark elements within html body
-      style.textContent = `
-        html body mark.afe-highlight {
-          background-color: yellow !important;
-          color: black !important;
-          padding: 0.1em !important;
-          border-radius: 0.2em !important;
-          box-shadow: 0 0 0 1px yellow !important;
-        }
-        html body mark.afe-highlight-current {
-          background-color: lightblue !important;
-          color: black !important;
-          box-shadow: 0 0 0 1px lightblue !important;
-        }
-        html body mark.afe-highlight-proximity {
-          background-color: lightgreen !important;
-          color: black !important;
-        }
-        html body mark.afe-highlight-secondary {
-          background-color: red !important;
-          color: white !important;
-        }
-      `;
-      return style;
-    }
-  
-    // Inject the style into the main document head if not already present.
-    if (!document.getElementById(styleId)) {
-      const style = createStyleElement();
-      if (document.head) {
-        document.head.appendChild(style);
-      } else {
-        document.addEventListener("DOMContentLoaded", () => {
-          document.head.appendChild(style);
-        });
-      }
-    }
-  
-    // Function to inject a clone of the style element into a given shadow root.
-    function injectStyleIntoShadow(root) {
-      if (!root) return;
-      if (!root.querySelector(`#${styleId}`)) {
-        const styleClone = createStyleElement();
-        root.appendChild(styleClone);
-      }
-      // Recursively check for nested shadow roots.
-      Array.from(root.children).forEach(child => {
-        if (child.shadowRoot) {
-          injectStyleIntoShadow(child.shadowRoot);
-        }
-      });
-    }
-  
-    // Find all elements with a shadowRoot and inject the style there.
-    document.querySelectorAll("*").forEach(el => {
-      if (el.shadowRoot) {
-        injectStyleIntoShadow(el.shadowRoot);
-      }
-    });
-  })();
-  
-  
 
+    // Function to create/update the style element with current config
+    function createOrUpdateStyleElement() {
+        let style = document.getElementById(styleId);
+        if (!style) {
+            style = document.createElement("style");
+            style.id = styleId;
+        }
+
+        // Ensure config and its dependent structures are loaded
+        if (!window.advancedFindConfig || !window.advancedFindConfig.config || !window.advancedFindConfig.config.highlight || !window.advancedFindConfig.config.settings) {
+            console.error("Cannot generate styles: Config not fully loaded.");
+            return null; // Return null if config isn't ready
+        }
+
+        const highlightConfig = window.advancedFindConfig.config.highlight;
+        const settings = window.advancedFindConfig.config.settings;
+
+        // Define default text color (assuming black is generally good contrast for light highlights)
+        const defaultTextColor = 'black';
+
+        // Use the primary highlight color from settings for the base style
+        const baseBgColor = settings.defaultHighlightColor || '#ffff00'; // Fallback yellow
+        const currentBgColor = highlightConfig.currentStyle?.backgroundColor || 'lightblue'; // Use optional chaining
+        const proximityBgColor = highlightConfig.proximityStyle?.backgroundColor || 'lightgreen';
+
+        let cssText = `
+            /* Base style for all highlights */
+            mark.${highlightConfig.baseClass} {
+                padding: 0.1em 0.15em !important; /* Slightly more horizontal padding */
+                border-radius: 0.25em !important; /* Slightly larger radius */
+                text-shadow: none !important;
+                background-color: ${baseBgColor} !important;
+                color: ${defaultTextColor} !important;
+                 /* Subtle outline matching background */
+                box-shadow: 0 0 0 1px ${baseBgColor} !important;
+                margin: 0 1px; /* Add tiny horizontal margin to prevent touching */
+            }
+
+            /* Current navigation highlight */
+            mark.${highlightConfig.currentHighlightClass} {
+                background-color: ${currentBgColor} !important;
+                color: ${highlightConfig.currentStyle?.color || defaultTextColor} !important;
+                /* More prominent outline/shadow */
+                box-shadow: 0 0 0 2px ${currentBgColor}, 0 1px 3px rgba(0,0,0,0.2) !important;
+                outline: 1px solid rgba(0,0,0,0.4) !important;
+                /* Optional: Slightly raise the element */
+                /* position: relative; z-index: 1; */
+            }
+
+             /* Proximity highlight */
+            mark.${highlightConfig.proximityHighlightClass} {
+                background-color: ${proximityBgColor} !important;
+                color: ${highlightConfig.proximityStyle?.color || defaultTextColor} !important;
+                box-shadow: 0 0 0 1px ${proximityBgColor} !important;
+             }
+        `;
+
+        // Add styles for multi-term classes dynamically based on config settings
+        // Use settings.multiHighlightColors as the source of truth
+        const multiColors = settings.multiHighlightColors || [];
+         highlightConfig.highlightClasses.forEach((className, index) => {
+             // Skip index 0 (handled by baseClass)
+             if (index === 0) return;
+
+             // Get color from settings array, using default style color if setting unavailable
+             const bgColor = multiColors[index - 1] || highlightConfig.styles[index]?.backgroundColor || '#CCCCCC'; // Fallback grey
+             const textColor = highlightConfig.styles[index]?.color || defaultTextColor;
+
+             cssText += `
+                 mark.${className} {
+                     background-color: ${bgColor} !important;
+                     color: ${textColor} !important;
+                      box-shadow: 0 0 0 1px ${bgColor} !important;
+                 }
+             `;
+        });
+
+        // Add styles for shadow DOM compatibility (simple version)
+        // This assumes :host and ::slotted work, complex cases might need more specific selectors
+         cssText += `
+            :host mark.${highlightConfig.baseClass},
+            ::slotted(mark.${highlightConfig.baseClass}) {
+                background-color: ${baseBgColor} !important;
+                color: ${defaultTextColor} !important;
+                padding: 0.1em 0.15em !important;
+                border-radius: 0.25em !important;
+                box-shadow: 0 0 0 1px ${baseBgColor} !important;
+                margin: 0 1px;
+            }
+            :host mark.${highlightConfig.currentHighlightClass},
+            ::slotted(mark.${highlightConfig.currentHighlightClass}) {
+                background-color: ${currentBgColor} !important;
+                color: ${highlightConfig.currentStyle?.color || defaultTextColor} !important;
+                box-shadow: 0 0 0 2px ${currentBgColor}, 0 1px 3px rgba(0,0,0,0.2) !important;
+                outline: 1px solid rgba(0,0,0,0.4) !important;
+            }
+            /* Add :host / ::slotted rules for other classes if needed */
+         `;
+
+        style.textContent = cssText;
+        return style;
+    }
+    // ... rest of the IIFE (injectIntoHead, injectIntoShadows, update function) remains largely the same ...
+
+     // Inject into main document head
+    function injectIntoHead(doc) {
+        const head = doc.head || doc.querySelector('head');
+         if (!head) {
+             doc.addEventListener("DOMContentLoaded", () => injectIntoHead(doc), { once: true });
+             return;
+         }
+        let style = createOrUpdateStyleElement();
+        if (!style) return; // Don't proceed if config wasn't ready
+
+        // Remove existing style first if present
+        const existingStyle = doc.getElementById(styleId);
+        if (existingStyle) {
+            existingStyle.remove();
+        }
+        head.appendChild(style);
+        
+    }
+
+    // Inject into Shadow DOMs
+    function injectIntoShadows(rootNode) {
+        rootNode.querySelectorAll('*').forEach(el => {
+            if (el.shadowRoot) {
+                 const existingShadowStyle = el.shadowRoot.getElementById(styleId);
+                 if (existingShadowStyle) {
+                     existingShadowStyle.remove(); // Remove old one first
+                 }
+                const styleClone = createOrUpdateStyleElement(); // Get updated style
+                if(styleClone) { // Check if style was created successfully
+                    el.shadowRoot.appendChild(styleClone);
+                }
+                // Recursively check within the shadow root
+                injectIntoShadows(el.shadowRoot);
+            }
+        });
+    }
+
+    // Initial injection attempt
+    injectIntoHead(document);
+    injectIntoShadows(document.documentElement);
+
+     // Expose a function to update styles if needed (e.g., after color change from settings)
+     window.updateAdvancedFindStyles = () => {
+         
+         injectIntoHead(document);
+         injectIntoShadows(document.documentElement);
+         // Optional: Force re-rendering (often not necessary as CSS applies)
+         // document.querySelectorAll('.afe-highlight').forEach(el => { el.style.display = 'none'; el.offsetHeight; el.style.display = ''; });
+     };
+
+})();
+
+
+// --- Main Content Script Logic ---
 (() => {
+    // Ensure this runs only once
+    if (window.advancedFindContentScriptLoaded) {
+        
+        return;
+    }
+    window.advancedFindContentScriptLoaded = true;
+
     let isContentScriptInjected = false;
-    let highlightManager = null;
-    // window.advancedFindDomUtils.injectHighlightStyle();
+    let highlightManagerInstance = null; // Will hold the instance from highlight-manager.js
 
-
-    function injectSidebarStyles() {
-        const style = document.createElement('style');
-        style.id = 'advanced-find-sidebar-styles';
-        style.textContent = `
-          body.has-advanced-find-sidebar {
-            margin-right: var(--sidebar-width, 350px) !important;
-            transition: margin-right 0.3s ease;
-            width: calc(100% - var(--sidebar-width, 350px)) !important;
-            position: relative;
-          }
-          #advanced-find-sidebar-container {
-            position: fixed;
-            top: 0;
-            right: 0;
-            width: var(--sidebar-width, 350px);
-            height: 100vh;
-            background: white;
-            z-index: 2147483647;
-            border-left: 1px solid #ccc;
-            box-shadow: -2px 0 5px rgba(0, 0, 0, 0.1);
-            transition: transform 0.3s ease;
-            display: flex;
-            flex-direction: column;
-          }
-          #advanced-find-sidebar {
-            width: 100%;
-            height: 100%;
-            border: none;
-            background: white;
-            flex: 1;
-          }
-        `;
-        document.head.appendChild(style);
+    // Function to initialize or retrieve the HighlightManager instance
+    function getHighlightManager() {
+        if (!highlightManagerInstance) {
+            if (window.highlightManager) {
+                highlightManagerInstance = window.highlightManager;
+                
+            } else {
+                console.error("Content Script: HighlightManager instance not found! Highlighting will fail.");
+                // This indicates a script loading order issue.
+                return null;
+            }
+        }
+        return highlightManagerInstance;
     }
 
-    function initResizableSidebar() {
-        const sidebarContainer = document.getElementById('advanced-find-sidebar-container');
-        if (!sidebarContainer) return;
-        let isResizing = false;
-        let startX, startWidth;
-
-        const resizeHandle = document.createElement('div');
-        resizeHandle.className = 'sidebar-resize-handle';
-        resizeHandle.style.cssText = `
-            position: absolute;
-            left: 0;
-            top: 0;
-            bottom: 0;
-            width: 3px;
-            cursor: ew-resize;
-            background: transparent;
-            transition: background-color 0.2s ease;
-        `;
-        sidebarContainer.appendChild(resizeHandle);
-
-        resizeHandle.addEventListener('mouseenter', () => {
-            if (!isResizing) {
-                resizeHandle.style.backgroundColor = 'rgba(0, 0, 0, 0.1)';
-            }
-        });
-        resizeHandle.addEventListener('mouseleave', () => {
-            if (!isResizing) {
-                resizeHandle.style.backgroundColor = 'transparent';
-            }
-        });
-
-        resizeHandle.addEventListener('mousedown', (e) => {
-            if (e.button !== 0) return;
-            isResizing = true;
-            startX = e.clientX;
-            startWidth = sidebarContainer.offsetWidth;
-            resizeHandle.style.backgroundColor = 'rgba(0, 0, 0, 0.2)';
-            document.body.style.cursor = 'ew-resize';
-            document.body.style.userSelect = 'none';
-            const iframe = document.getElementById('advanced-find-sidebar');
-            if (iframe) {
-                iframe.style.pointerEvents = 'none';
-            }
-
-            document.addEventListener('mousemove', handleMouseMove);
-            document.addEventListener('mouseup', handleMouseUp);
-            e.preventDefault();
-            e.stopPropagation();
-        });
-
-        function handleMouseMove(e) {
-            if (!isResizing) return;
-            const diff = e.clientX - startX;
-            let newWidth = Math.min(800, Math.max(250, startWidth - diff));
-            requestAnimationFrame(() => {
-                sidebarContainer.style.width = `${newWidth}px`;
-                document.documentElement.style.setProperty('--sidebar-width', `${newWidth}px`);
-            });
-            e.preventDefault();
-        }
-
-        function handleMouseUp(e) {
-            if (!isResizing) return;
-            isResizing = false;
-            resizeHandle.style.backgroundColor = 'transparent';
-            document.body.style.cursor = '';
-            document.body.style.userSelect = '';
-            const iframe = document.getElementById('advanced-find-sidebar');
-            if (iframe) {
-                iframe.style.pointerEvents = '';
-            }
-            document.removeEventListener('mousemove', handleMouseMove);
-            document.removeEventListener('mouseup', handleMouseUp);
-
-            const finalWidth = sidebarContainer.offsetWidth;
-            chrome.storage.sync.set({ sidebarWidth: finalWidth });
-            e.preventDefault();
-            e.stopPropagation();
-        }
-
-        chrome.storage.sync.get(['sidebarWidth'], (result) => {
-            if (result.sidebarWidth) {
-                const width = result.sidebarWidth;
-                sidebarContainer.style.width = `${width}px`;
-                document.documentElement.style.setProperty('--sidebar-width', `${width}px`);
-            }
-        });
-
-        return function cleanup() {
-            resizeHandle.remove();
-            document.removeEventListener('mousemove', handleMouseMove);
-            document.removeEventListener('mouseup', handleMouseUp);
-        };
-    }
-
-
+    // Main initialization function
     function initializeContentScript() {
-        if (isContentScriptInjected) return;
-
-        try {
-            // Access the highlightManager directly from the window object.
-            highlightManager = window.highlightManager;
-            setupMessageListeners();
-
-            // Debounced reapply function (simplified)
-            let lastSearchText = null;
-            let lastOptions = null;
-
-            const debouncedReapply = debounce(() => {
-                if (lastSearchText && lastOptions && !lastOptions.isProximity) {
-                    console.warn("🔄 Reapplying the highlights due to DOM changes...");
-                    highlightManager.highlight(lastSearchText, lastOptions);
-                }
-            }, 300);
-            
-            const observer = new MutationObserver((mutations) => {
-                if (!document.querySelector(".afe-highlight, .afe-highlight-proximity, .afe-highlight-secondary")) {
-                    debouncedReapply();
-                }
-            });
-            observer.observe(document.body, { childList: true, subtree: true });
-            
-
-            isContentScriptInjected = true;
-            console.log("Advanced Find Extension: Content script initialized successfully");
-            chrome.runtime.sendMessage({ type: "CONTENT_SCRIPT_READY" });
-        } catch (error) {
-            console.error('Error initializing content script:', error);
+        // Double-check to prevent multiple initializations
+        if (isContentScriptInjected) {
+             
+             return;
         }
-    }
+
+        
+
+        // Load settings from storage first to configure behavior
+        chrome.storage.sync.get(
+             [ // Load all settings that affect content script behavior or styles
+                 'highlightColor',
+                 // 'displayMode', // If sidebar logic was here
+                 'ignoreDiacritics',
+                 'searchHistoryEnabled', // Needed for config update
+                 'persistentHighlightsEnabled',
+                 'multiHighlightColors'
+             ],
+            (settings) => {
+                 if (chrome.runtime.lastError) {
+                     console.error("Error loading settings in content script:", chrome.runtime.lastError.message);
+                     // Proceed with defaults if loading fails?
+                 } else {
+                     
+                     // Update the global config object before doing anything else
+                     window.advancedFindConfig?.updateConfigFromStorage(settings);
+                     // Update injected CSS styles based on loaded settings
+                     window.updateAdvancedFindStyles?.();
+                 }
+
+                 // Now, attempt to get the manager instance AFTER config is potentially updated
+                 highlightManagerInstance = getHighlightManager();
+
+                 if (highlightManagerInstance) {
+                     setupMessageListeners(); // Setup listeners to respond to popup/background
+                     isContentScriptInjected = true; // Mark as injected *before* potential async restore
+                     
+
+                     // Restore highlights if the setting is enabled
+                     if (window.advancedFindConfig?.config?.settings?.persistentHighlightsEnabled) {
+                         
+                         window.advancedFindPersistence?.restoreState((terms, options) => {
+                            if (terms && options && highlightManagerInstance) {
+                                 
+                                 // Get a fresh instance in case it was recreated
+                                 const currentManager = getHighlightManager();
+                                 if (!currentManager) {
+                                     console.error("HighlightManager gone during restore callback!");
+                                     return;
+                                 }
+
+                                 // Determine which highlight function to call
+                                 if (options.isProximity && terms.length === 2 && options.proximityValue !== undefined) {
+                                     currentManager.highlightProximity(terms[0], terms[1], options.proximityValue, options, (count) => {
+                                          
+                                          if (count > 0) renderTickMarksDebounced(); // Use debounced version
+                                      });
+                                 } else if (!options.isProximity && terms.length > 0) {
+                                      currentManager.highlight(terms, options, (count) => {
+                                          
+                                          if (count > 0) renderTickMarksDebounced(); // Use debounced version
+                                      });
+                                 } else {
+                                     console.warn("Invalid state data for persistence restore.", {terms, options});
+                                 }
+                            } else {
+                                
+                            }
+                         });
+                     } else {
+                          
+                     }
+
+                     // Send ready message AFTER potential restore starts (restore is async)
+                     // Background/popup can proceed, restore will finish when it finishes.
+                     chrome.runtime.sendMessage({ type: "CONTENT_SCRIPT_READY" }, (response) => {
+                         if (chrome.runtime.lastError) {
+                              if (!chrome.runtime.lastError.message.includes("Receiving end does not exist")) {
+                                 console.warn("Error sending CONTENT_SCRIPT_READY:", chrome.runtime.lastError.message);
+                              }
+                         } else {
+                             
+                         }
+                     });
+
+                 } else {
+                     console.error("Advanced Find Extension: Failed to initialize HighlightManager. Script may not function.");
+                     // Attempting to send ready message might fail, or popup check will fail.
+                 }
+            } // End callback for chrome.storage.sync.get
+        ); // End chrome.storage.sync.get call
+
+    } // End initializeContentScript
 
     function setupMessageListeners() {
         chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-            if (!highlightManager) {
-                sendResponse({ success: false, error: "Highlight manager not initialized" });
-                return true; // keep channel open for async responses.
+            const manager = getHighlightManager(); // Get latest manager instance
+
+            // Allow CHECK_INJECTION even if manager isn't ready
+            if (request.type === "CHECK_INJECTION") {
+                sendResponse({ injected: isContentScriptInjected });
+                return false; // Synchronous response
             }
+
+            // For all other messages, require the manager
+            if (!manager) {
+                console.error(`Cannot handle message type "${request.type}": HighlightManager not ready.`);
+                sendResponse({ success: false, error: "HighlightManager not initialized" });
+                return false; // Synchronous error response
+            }
+
+            // Log received messages
+
+            // Flag to indicate if sendResponse will be async
+            let isAsync = false;
 
             switch (request.type) {
-                case "CHECK_INJECTION":
-                    sendResponse({ injected: isContentScriptInjected });
-                    break;
-
                 case "SEARCH_TEXT":
-                    // Store the search term and options for later re-application
-                    lastSearchText = request.payload.searchTerm;
-                    lastOptions = request.payload.options;
-
-                    highlightManager.highlight(lastSearchText, lastOptions);
-                    sendResponse({success: true}); // Acknowledge receipt
+                    if (!request.payload || !request.payload.searchTerms || !Array.isArray(request.payload.searchTerms)) {
+                         console.error("Invalid SEARCH_TEXT payload:", request.payload);
+                         sendResponse({ success: false, error: "Invalid search terms payload." });
+                         break; // Sync response
+                    }
+                     isAsync = true; // Mark as async
+                    manager.highlight(request.payload.searchTerms, request.payload.options, (count) => {
+                        sendResponse({ success: true, count: count });
+                        // Don't render ticks here, popup does it after response
+                    });
                     break;
 
-                    case "SEARCH_PROXIMITY":
-                        // Pass the callback to return the match count.
-                        highlightManager.highlightProximity(
-                            request.payload.searchTerm,
-                            request.payload.searchTerm2,
-                            request.payload.proximityValue,
-                            request.payload.options,
-                            (count) => {
-                                sendResponse({ success: true, count });
-                            }
-                        );
-                        return true; // Keep message channel open
-                    
-                    
+                case "SEARCH_PROXIMITY":
+                     if (!request.payload || !request.payload.searchTerm || !request.payload.searchTerm2 || request.payload.proximityValue === undefined) {
+                         console.error("Invalid SEARCH_PROXIMITY payload:", request.payload);
+                         sendResponse({ success: false, error: "Invalid proximity terms payload." });
+                         break; // Sync response
+                     }
+                    isAsync = true; // Mark as async
+                    manager.highlightProximity(
+                        request.payload.searchTerm,
+                        request.payload.searchTerm2,
+                        request.payload.proximityValue,
+                        request.payload.options,
+                        (count) => {
+                            sendResponse({ success: true, count: count });
+                             // Don't render ticks here, popup does it after response
+                        }
+                    );
+                    break;
 
                 case "CLEAR_HIGHLIGHTS":
-                    highlightManager.clearHighlights();
-                    removeTickMarks(); // Remove tick marks
+                    manager.clearHighlights();
+                    removeTickMarks(); // Remove tick marks immediately on clear
                     sendResponse({ success: true });
-                    break;
-
-
-                case "TOGGLE_SIDEBAR": {
-                    let sidebarContainer = document.getElementById('advanced-find-sidebar-container');
-                    if (sidebarContainer) {
-                        sidebarContainer.classList.toggle('hidden');
-                        document.body.classList.toggle('sidebar-hidden');
-                        sendResponse({ success: true });
-                    } else {
-                        injectSidebarStyles();
-                        document.body.classList.add('has-advanced-find-sidebar');
-                        sidebarContainer = document.createElement('div');
-                        sidebarContainer.id = 'advanced-find-sidebar-container';
-                        const iframe = document.createElement('iframe');
-                        iframe.id = 'advanced-find-sidebar';
-                        iframe.src = chrome.runtime.getURL('popup.html');
-                        iframe.src = chrome.runtime.getURL('popup.html');
-                        sidebarContainer.appendChild(iframe);
-                        document.body.appendChild(sidebarContainer);
-                        setTimeout(() => {
-                            initResizableSidebar();
-                            sendResponse({ success: true });
-                        }, 100);
-                        return true; // Keep the message channel open for the setTimeout.
-                    }
-                    break;
-                }
+                    break; // Sync response
 
                 case "NAVIGATE":
-                    // Calls the navigate() method (defined in highlight-manager.js below)
-                    highlightManager.navigate(request.payload.direction);
-                    sendResponse({ success: true });
+                    if (!request.payload || (request.payload.direction !== 'next' && request.payload.direction !== 'previous')) {
+                         console.error("Invalid NAVIGATE payload:", request.payload);
+                         sendResponse({ success: false, error: "Invalid navigation direction." });
+                         break; // Sync response
+                     }
+                    manager.navigate(request.payload.direction);
+                    sendResponse({ success: true }); // Navigation is effectively synchronous
                     break;
-        
 
-                case "CLEANUP_SIDEBAR":
-                    cleanupSidebar();
-                    sendResponse({ success: true });
-                    break;
+                case "GET_HIGHLIGHTS_FOR_EXPORT":
+                    try {
+                        const highlightsData = manager.getHighlightsForExport();
+                         sendResponse({
+                             success: true,
+                             highlights: highlightsData,
+                             pageUrl: window.location.href,
+                             pageTitle: document.title
+                         });
+                    } catch (error) {
+                        console.error("Error gathering highlights for export:", error);
+                        sendResponse({ success: false, error: "Failed to gather highlights: " + error.message });
+                    }
+                    break; // Sync response
 
                 case "RENDER_TICK_MARKS":
-                    renderTickMarks();
-                    sendResponse({success: true}); // Acknowledge
+                    renderTickMarksDebounced(); // Use debounced render
+                    sendResponse({ success: true });
+                    break; // Sync response
+
+                 case "CLEAR_TICK_MARKS":
+                     removeTickMarks();
+                     sendResponse({ success: true });
+                     break; // Sync response
+
+                 case "UPDATE_SETTINGS":
+                     
+                     if (window.advancedFindConfig?.updateConfigFromStorage) {
+                        window.advancedFindConfig.updateConfigFromStorage(request.payload);
+                        window.updateAdvancedFindStyles?.(); // Update injected styles
+                        // Optional: Decide if a re-highlight is needed based on changed settings
+                        // e.g., if ignoreDiacritics changed, might need re-search.
+                        // manager?.reapplyHighlights(); // Consider implications
+                     } else {
+                         console.error("Config update function not available.");
+                     }
+                     sendResponse({ success: true });
+                     break; // Sync response
+
+
+                // --- Sidebar related messages (Placeholder - Implement if sidebar feature is built) ---
+                case "TOGGLE_SIDEBAR":
+                     console.warn("TOGGLE_SIDEBAR handling not implemented in content.js.");
+                     // Example: if sidebar was an iframe managed here:
+                     // toggleSidebarIframe();
+                    sendResponse({ success: true, message: "Sidebar toggle acknowledged (not implemented)." });
                     break;
+                case "CLEANUP_SIDEBAR":
+                     console.warn("CLEANUP_SIDEBAR handling not implemented in content.js.");
+                    // cleanupSidebarIframe();
+                    sendResponse({ success: true, message: "Sidebar cleanup acknowledged (not implemented)." });
+                    break;
+
+
+                default:
+                    console.warn(`Unknown message type received: ${request.type}`);
+                    sendResponse({ success: false, error: `Unknown message type: ${request.type}` });
+                    break; // Sync response
             }
 
-            return true; // Keep the message channel open for async responses.
+            // Return true ONLY if sendResponse is called asynchronously (within a callback)
+            return isAsync;
         });
-    }
+         
 
+    } // End setupMessageListeners
 
-    function cleanupSidebar() {
-        const sidebarContainer = document.getElementById('advanced-find-sidebar-container');
-        if (sidebarContainer) {
-            sidebarContainer.remove();
-        }
-        const styles = document.getElementById('advanced-find-sidebar-styles');
-        if (styles) {
-            styles.remove();
-        }
-        document.body.classList.remove('has-advanced-find-sidebar', 'sidebar-hidden');
-    }
 
     // --- Tick Mark Rendering ---
+    let tickMarkContainer = null;
+    const renderTickMarksDebounced = window.advancedFindDomUtils.debounce(renderTickMarks, 150); // Debounce rendering
+
+
     function renderTickMarks() {
-        let container = document.getElementById("tick-mark-container");
-        if (container) container.remove();
+        // Clear existing ticks first
+        removeTickMarks();
 
-        container = document.createElement("div");
-        container.id = "tick-mark-container";
-        container.style.position = "fixed";
-        container.style.top = "0";
-        container.style.right = "0";
-        container.style.width = "10px";
-        container.style.height = "100%";
-        container.style.zIndex = "2147483646"; // just below our sidebar
-        document.body.appendChild(container);
-
-        const docHeight = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
-        const highlights = document.querySelectorAll(".afe-highlight, .afe-highlight-proximity");  //Also include proximity
-        highlights.forEach(span => {
-            const rect = span.getBoundingClientRect();
-            const topPosition = ((rect.top + window.scrollY) / docHeight) * 100;
-            const tick = document.createElement("div");
-            tick.className = "tick-mark";
-            tick.style.position = "absolute";
-            tick.style.left = "0";
-            tick.style.width = "10px";
-            tick.style.height = "5px";
-            tick.style.backgroundColor = window.advancedFindConfig.tickMarkColor; // Use configured color
-            tick.style.top = `calc(${topPosition}% - 2.5px)`;
-            tick.style.cursor = "pointer";
-            tick.addEventListener("click", () => {
-                span.scrollIntoView({ behavior: "smooth", block: "center" });
-            });
-            container.appendChild(tick);
+        // Create container (only if it doesn't exist)
+        tickMarkContainer = document.createElement("div");
+        tickMarkContainer.id = "afe-tick-mark-container";
+        // Apply styles via JS (could be moved to injected CSS, but simpler here for dynamic elements)
+        Object.assign(tickMarkContainer.style, {
+            position: 'fixed',
+            top: '0',
+            right: '0', // Position on the right
+            width: '10px', // Width of the tick bar
+            height: '100%',
+            zIndex: '2147483645', // High z-index, but below potential modals/sidebars (2147483647)
+            pointerEvents: 'none', // Allow clicks to pass through container
+             // Optional: subtle background for the bar?
+             // backgroundColor: 'rgba(0, 0, 0, 0.03)',
         });
+
+        // Find a suitable parent to append to (usually body, but handle edge cases)
+        const appendTarget = document.body || document.documentElement;
+         try {
+             appendTarget.appendChild(tickMarkContainer);
+         } catch (e) {
+             console.error("Failed to append tick mark container:", e);
+             tickMarkContainer = null; // Reset if failed
+             return;
+         }
+
+        // Get all types of highlights using the base class
+        const highlights = document.querySelectorAll(`.${window.advancedFindConfig?.config?.highlight?.baseClass}`);
+        if (!highlights || highlights.length === 0) {
+            
+            removeTickMarks(); // Clean up container if no highlights
+            return;
+        }
+
+        const docHeight = Math.max(
+            document.body.scrollHeight, document.documentElement.scrollHeight,
+            document.body.offsetHeight, document.documentElement.offsetHeight,
+            document.body.clientHeight, document.documentElement.clientHeight
+        );
+
+        if (docHeight <= 0) {
+             console.warn("Could not determine document height for tick marks.");
+             return;
+         }
+
+        const tickMarkColor = window.advancedFindConfig?.tickMarkColor || "rgba(200, 0, 0, 0.6)"; // Slightly less harsh red
+
+        // Use a DocumentFragment for performance when adding many ticks
+        const fragment = document.createDocumentFragment();
+
+        highlights.forEach(span => {
+             try {
+                const rect = span.getBoundingClientRect();
+                // Account for scroll position to get position relative to document
+                const scrollY = window.pageYOffset || document.documentElement.scrollTop;
+                const elementTopInDocument = rect.top + scrollY;
+                // Calculate percentage position, ensuring it's within 0-100
+                const topPercentage = Math.max(0, Math.min(100, (elementTopInDocument / docHeight) * 100));
+
+                const tick = document.createElement("div");
+                tick.className = "afe-tick-mark";
+                 Object.assign(tick.style, {
+                    position: 'absolute',
+                    left: '0',
+                    width: '100%', // Fill container width
+                    height: '2px', // Thin ticks
+                    backgroundColor: tickMarkColor,
+                    top: `calc(${topPercentage}% - 1px)`, // Center the 2px tick vertically
+                    pointerEvents: 'auto', // Make individual ticks interactive
+                    cursor: 'pointer',
+                    borderRadius: '1px' // Optional rounding
+                 });
+                 tick.setAttribute('role', 'button');
+                 tick.setAttribute('aria-label', 'Scroll to highlight');
+                 tick.title = 'Scroll to highlight'; // Tooltip
+
+                tick.addEventListener("click", (e) => {
+                    e.stopPropagation(); // Prevent potential container events
+                    span.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+
+                    // Temporarily emphasize the scrolled-to highlight
+                    const currentClass = window.advancedFindConfig?.config?.highlight?.currentHighlightClass;
+                    if (currentClass) {
+                        const manager = getHighlightManager();
+                        // Check if it's *already* the current nav target
+                        const isCurrentNav = manager && manager.currentHighlights[manager.currentIndex] === span;
+                        if (!isCurrentNav) {
+                            span.classList.add(currentClass);
+                            setTimeout(() => {
+                                // Re-check if it became the current nav target in the meantime
+                                const stillNotCurrentNav = manager && manager.currentHighlights[manager.currentIndex] !== span;
+                                if (stillNotCurrentNav) {
+                                    span.classList.remove(currentClass);
+                                }
+                             }, 1500); // Remove emphasis after 1.5 seconds unless it's the navigated element
+                        }
+                    }
+                });
+                fragment.appendChild(tick);
+             } catch (e) {
+                  console.warn("Error processing highlight element for tick mark:", span, e);
+             }
+        });
+
+        tickMarkContainer.appendChild(fragment); // Append all ticks at once
+        
     }
 
     function removeTickMarks() {
-        const container = document.getElementById("tick-mark-container");
-        if (container) container.remove();
-    }
-
-    // Simple debounce function
-    function debounce(func, wait) {
-        let timeout;
-        return function(...args) {
-            const context = this;
-            clearTimeout(timeout);
-            timeout = setTimeout(() => func.apply(context, args), wait);
-        };
+        if (tickMarkContainer) {
+            tickMarkContainer.remove();
+            tickMarkContainer = null; // Clear reference
+            
+        }
     }
 
 
-    initializeContentScript(); // Initialize immediately
+    // --- Initialization Call ---
+    // Use DOMContentLoaded to ensure the DOM is ready, especially the body/head
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initializeContentScript);
+    } else {
+        // DOM is already ready
+        initializeContentScript();
+    }
 
-})();
+})(); // End Main Content Script IIFE
