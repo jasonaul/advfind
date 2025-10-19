@@ -7,6 +7,15 @@ document.addEventListener("DOMContentLoaded", () => {
     const RETRY_DELAY = 200;
     let lastExplicitSearchTerm = "";
     const MAX_HISTORY_ITEMS = 10;
+    const WORKSPACE_HISTORY_LIMIT = 10;
+    const WORKSPACE_HISTORY_LOOKBACK_MS = 1000 * 60 * 60 * 24; // 24 hours
+
+    const workspaceState = {
+        lastQuery: null,
+        tabResults: [],
+        historyResults: [],
+        isScanning: false
+    };
 
   const listeners = []; // Store listeners to remove them later
   
@@ -19,8 +28,8 @@ document.addEventListener("DOMContentLoaded", () => {
                 const tab = tabs[0];
                 const url = tab.url;
                 
-                const restrictedPrefixes = ['chrome://', 'edge://', 'chrome-extension://', 'about:', 'view-source:', 'file://'];
-                const allowedPrefixes = ['http://', 'https://'];
+                const restrictedPrefixes = ['chrome://', 'edge://', 'chrome-extension://', 'about:', 'view-source:'];
+                const allowedPrefixes = ['http://', 'https://', 'file://'];
                 if (!url || restrictedPrefixes.some(prefix => url.startsWith(prefix)) || !allowedPrefixes.some(prefix => url.startsWith(prefix))) {
                     const simpleUrl = url ? url.split('/')[0] : 'N/A';
                     console.warn(`[Popup] Cannot run on this page type: ${simpleUrl}`);
@@ -36,6 +45,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     
                     checkContentScript(); // Check connection AFTER settings are ready
                     renderSearchHistory();
+                    renderWorkspaceResults();
                 });
             } else {
                 console.error("[Popup] No active tab found in query.");
@@ -356,6 +366,9 @@ document.addEventListener("DOMContentLoaded", () => {
         const ignoreDiacriticsSettingsChk = document.getElementById('ignoreDiacriticsSettingsCheckbox'); // Get settings checkbox
         const searchHistoryEnabledChk = document.getElementById('searchHistoryEnabled'); // Get settings checkbox
         const persistentHighlightsEnabledChk = document.getElementById('persistentHighlightsEnabled'); // Get settings checkbox
+        const workspaceSearchButton = document.getElementById("workspaceSearchButton");
+        const workspaceSearchInput = document.getElementById("workspaceSearchInput");
+        const workspaceRefreshButton = document.getElementById("workspaceRefreshButton");
     
     
         // --- Checkbox & Radio State Handling ---
@@ -446,6 +459,16 @@ document.addEventListener("DOMContentLoaded", () => {
         addListener(regexCheckbox, "change", (e) => { // Mode toggle checkbox
              // The handleToggleChange listener ALREADY handles the visual is-checked class
              if (e.target.checked) switchToRegexMode(); else returnToStandardMode();
+        });
+
+        // Workspace Search
+        addListener(workspaceSearchButton, "click", () => runWorkspaceSearch());
+        addListener(workspaceRefreshButton, "click", () => runWorkspaceSearch({ reuseLast: true }));
+        addListener(workspaceSearchInput, "keydown", (event) => {
+            if (event.key === "Enter") {
+                event.preventDefault();
+                runWorkspaceSearch();
+            }
         });
     
         // Regex Options Radios (listeners added in setupRegexMode via addListener)
@@ -952,7 +975,447 @@ document.addEventListener("DOMContentLoaded", () => {
              console.error("Could not find appropriate input field for history item.");
          }
     }
-  
+
+    // --- Workspace Search ---
+    function updateWorkspaceStatus(message = "", isError = false) {
+        const statusElement = document.getElementById("workspace-status");
+        if (!statusElement) return;
+        statusElement.textContent = message;
+        statusElement.classList.toggle('error', !!message && isError);
+        if (!message) {
+            statusElement.classList.remove('error');
+        }
+    }
+
+    function setWorkspaceBusy(isBusy) {
+        workspaceState.isScanning = isBusy;
+        const searchButton = document.getElementById("workspaceSearchButton");
+        const refreshButton = document.getElementById("workspaceRefreshButton");
+        const input = document.getElementById("workspaceSearchInput");
+        if (searchButton) searchButton.disabled = isBusy;
+        if (input) input.disabled = isBusy;
+        if (refreshButton) refreshButton.disabled = isBusy || !workspaceState.lastQuery;
+    }
+
+    function renderWorkspaceResults(tabResults = workspaceState.tabResults, historyResults = workspaceState.historyResults) {
+        const container = document.getElementById("workspace-results");
+        const refreshButton = document.getElementById("workspaceRefreshButton");
+        if (!container) return;
+
+        container.innerHTML = "";
+
+        const combined = [];
+        if (Array.isArray(tabResults) && tabResults.length) combined.push(...tabResults);
+        if (Array.isArray(historyResults) && historyResults.length) combined.push(...historyResults);
+
+        if (combined.length === 0) {
+            const emptyState = document.createElement("div");
+            emptyState.className = "workspace-result";
+            emptyState.textContent = workspaceState.lastQuery ? "No matches found. Adjust your terms and try again." : "Run a workspace scan to see results here.";
+            container.appendChild(emptyState);
+        } else {
+            combined
+                .sort((a, b) => (b.totalMatches || 0) - (a.totalMatches || 0))
+                .forEach(result => container.appendChild(buildWorkspaceResultCard(result)));
+        }
+
+        if (refreshButton) {
+            refreshButton.disabled = workspaceState.isScanning || !workspaceState.lastQuery;
+        }
+    }
+
+    function buildWorkspaceQuery(termString) {
+        const rawTerms = termString.split(',').map(t => t.trim()).filter(Boolean);
+        if (rawTerms.length === 0) {
+            return null;
+        }
+
+        const caseSensitive = document.getElementById("caseSensitiveCheckbox")?.checked || false;
+        const wholeWords = document.getElementById("wholeWordsCheckbox")?.checked || false;
+        const ignoreDiacritics = document.getElementById("ignoreDiacriticsCheckbox")?.checked || false;
+        const excludeTerm = document.getElementById("excludeTermInput")?.value.trim() || "";
+        const includeHistory = document.getElementById("workspaceIncludeHistory")?.checked || false;
+        const includeAllWindows = document.getElementById("workspaceAllWindows")?.checked || false;
+        const useRegex = rawTerms.some(term => term.includes('*'));
+
+        return {
+            termString,
+            terms: rawTerms,
+            options: { caseSensitive, wholeWords, ignoreDiacritics, excludeTerm, useRegex },
+            includeHistory,
+            includeAllWindows
+        };
+    }
+
+    async function runWorkspaceSearch({ reuseLast = false } = {}) {
+        if (workspaceState.isScanning) return;
+
+        const inputElement = document.getElementById("workspaceSearchInput");
+        if (!inputElement) return;
+
+        let termString = reuseLast && workspaceState.lastQuery ? workspaceState.lastQuery.termString : inputElement.value.trim();
+        if (!termString && workspaceState.lastQuery) {
+            termString = workspaceState.lastQuery.termString;
+        }
+
+        const query = buildWorkspaceQuery(termString || "");
+        if (!query) {
+            updateWorkspaceStatus("Enter at least one search term.", true);
+            return;
+        }
+
+        workspaceState.lastQuery = query;
+        inputElement.value = query.termString;
+
+        setWorkspaceBusy(true);
+        updateWorkspaceStatus("Scanning workspace...");
+
+        try {
+            const tabResults = await scanTabsForMatches(query);
+            workspaceState.tabResults = tabResults;
+
+            const historyResults = query.includeHistory ? await scanHistoryForMatches(query, tabResults) : [];
+            workspaceState.historyResults = historyResults;
+
+            renderWorkspaceResults(tabResults, historyResults);
+
+            const tabTotal = tabResults.reduce((sum, item) => sum + (item.totalMatches || 0), 0);
+            const historyTotal = historyResults.reduce((sum, item) => sum + (item.totalMatches || 0), 0);
+            const aggregate = tabTotal + historyTotal;
+
+            if (aggregate > 0) {
+                updateWorkspaceStatus(`Found ${aggregate} matches across workspace.`);
+            } else {
+                updateWorkspaceStatus("No matches found across workspace.");
+            }
+        } catch (error) {
+            console.error("Workspace scan failed:", error);
+            updateWorkspaceStatus(`Workspace scan failed: ${error.message || error}`, true);
+        } finally {
+            setWorkspaceBusy(false);
+        }
+    }
+
+    function buildWorkspaceResultCard(result) {
+        const card = document.createElement("div");
+        card.className = `workspace-result${(result.totalMatches || 0) === 0 ? " zero" : ""}`;
+
+        const header = document.createElement("div");
+        header.className = "workspace-result-header";
+
+        const titleContainer = document.createElement("div");
+        titleContainer.className = "workspace-result-title";
+
+        const title = document.createElement("span");
+        title.textContent = result.title || result.url || (result.type === "tab" ? "Unnamed tab" : "History entry");
+        title.title = title.textContent;
+
+        const urlMeta = document.createElement("div");
+        urlMeta.className = "workspace-result-meta";
+        if (result.url) {
+            urlMeta.textContent = result.url;
+            urlMeta.title = result.url;
+        } else {
+            urlMeta.textContent = result.type === "history" ? "History entry" : "Active tab";
+        }
+
+        titleContainer.appendChild(title);
+        titleContainer.appendChild(urlMeta);
+
+        const totalBadge = document.createElement("span");
+        totalBadge.className = "workspace-result-meta";
+        totalBadge.textContent = `${result.totalMatches || 0} match${(result.totalMatches || 0) === 1 ? "" : "es"}`;
+
+        header.appendChild(titleContainer);
+        header.appendChild(totalBadge);
+        card.appendChild(header);
+
+        if (Array.isArray(result.perTerm) && result.perTerm.length) {
+            const termBreakdown = document.createElement("div");
+            termBreakdown.className = "workspace-result-meta";
+            termBreakdown.textContent = result.perTerm
+                .map(entry => entry.error ? `${entry.term}: error` : `${entry.term}: ${entry.count ?? 0}`)
+                .join(" • ");
+            card.appendChild(termBreakdown);
+        }
+
+        if (result.error) {
+            const errorLine = document.createElement("div");
+            errorLine.className = "workspace-result-meta";
+            errorLine.textContent = `Error: ${result.error}`;
+            card.appendChild(errorLine);
+        }
+
+        const actions = document.createElement("div");
+        actions.className = "workspace-result-actions";
+
+        if (result.type === "tab") {
+            const focusBtn = document.createElement("button");
+            focusBtn.className = "secondary-button compact";
+            focusBtn.textContent = "Focus tab";
+            focusBtn.addEventListener("click", () => focusWorkspaceTab(result));
+
+            const highlightBtn = document.createElement("button");
+            highlightBtn.className = "secondary-button compact";
+            highlightBtn.textContent = "Highlight";
+            highlightBtn.addEventListener("click", () => highlightWorkspaceTab(result));
+
+            actions.appendChild(focusBtn);
+            actions.appendChild(highlightBtn);
+        } else if (result.type === "history") {
+            const openBtn = document.createElement("button");
+            openBtn.className = "secondary-button compact";
+            openBtn.textContent = "Open page";
+            openBtn.addEventListener("click", () => openHistoryResult(result));
+            actions.appendChild(openBtn);
+        }
+
+        if (actions.childElementCount > 0) {
+            card.appendChild(actions);
+        }
+
+        return card;
+    }
+
+    function isUrlEligibleForWorkspace(url) {
+        if (!url) return false;
+        const restrictedPrefixes = ['chrome://', 'edge://', 'chrome-extension://', 'about:', 'view-source:', 'devtools://', 'chrome-search://'];
+        return !restrictedPrefixes.some(prefix => url.startsWith(prefix));
+    }
+
+    function scanTabsForMatches(query) {
+        return new Promise((resolve) => {
+            const tabQuery = query.includeAllWindows ? {} : { currentWindow: true };
+            chrome.tabs.query(tabQuery, (tabs) => {
+                if (chrome.runtime.lastError) {
+                    console.error("tabs.query failed:", chrome.runtime.lastError.message);
+                    resolve([]);
+                    return;
+                }
+
+                const eligibleTabs = (tabs || []).filter(tab => isUrlEligibleForWorkspace(tab.url));
+                if (eligibleTabs.length === 0) {
+                    resolve([]);
+                    return;
+                }
+
+                const payload = {
+                    searchTerms: query.terms,
+                    options: {
+                        caseSensitive: query.options.caseSensitive,
+                        wholeWords: query.options.wholeWords,
+                        ignoreDiacritics: query.options.ignoreDiacritics,
+                        excludeTerm: query.options.excludeTerm,
+                        useRegex: query.options.useRegex
+                    }
+                };
+
+                Promise.all(eligibleTabs.map(tab => countMatchesInTab(tab, payload))).then(resolve);
+            });
+        });
+    }
+
+    function countMatchesInTab(tab, payload) {
+        return new Promise((resolve) => {
+            chrome.tabs.sendMessage(tab.id, { type: "COUNT_MATCHES", payload }, (response) => {
+                const baseResult = {
+                    type: "tab",
+                    tabId: tab.id,
+                    windowId: tab.windowId,
+                    title: tab.title || tab.url || "Tab",
+                    url: tab.url,
+                    favIconUrl: tab.favIconUrl,
+                    totalMatches: 0,
+                    perTerm: payload.searchTerms.map(term => ({ term, count: 0 }))
+                };
+
+                if (chrome.runtime.lastError) {
+                    const errorMessage = chrome.runtime.lastError.message;
+                    if (!errorMessage.includes("Receiving end does not exist")) {
+                        console.warn(`Workspace COUNT_MATCHES error in tab ${tab.id}:`, errorMessage);
+                    }
+                    baseResult.error = errorMessage;
+                    resolve(baseResult);
+                    return;
+                }
+
+                if (response && response.success) {
+                    baseResult.totalMatches = response.total || 0;
+                    baseResult.perTerm = Array.isArray(response.perTerm) ? response.perTerm : baseResult.perTerm;
+                } else if (response && response.error) {
+                    baseResult.error = response.error;
+                }
+
+                resolve(baseResult);
+            });
+        });
+    }
+
+    function scanHistoryForMatches(query, tabResults = []) {
+        return new Promise((resolve) => {
+            if (!chrome.history || typeof chrome.history.search !== "function") {
+                console.warn("History API unavailable; skipping history scan.");
+                resolve([]);
+                return;
+            }
+
+            chrome.history.search({
+                text: "",
+                maxResults: WORKSPACE_HISTORY_LIMIT * 4,
+                startTime: Date.now() - WORKSPACE_HISTORY_LOOKBACK_MS
+            }, (entries) => {
+                if (chrome.runtime.lastError) {
+                    console.error("History search failed:", chrome.runtime.lastError.message);
+                    resolve([]);
+                    return;
+                }
+
+                const tabUrls = new Set((tabResults || []).map(result => result.url));
+                const seen = new Set();
+                const filtered = [];
+
+                (entries || [])
+                    .sort((a, b) => (b.lastVisitTime || 0) - (a.lastVisitTime || 0))
+                    .some(entry => {
+                        if (!entry.url || seen.has(entry.url)) return false;
+                        if (!isUrlEligibleForWorkspace(entry.url)) return false;
+                        if (tabUrls.has(entry.url)) return false;
+
+                        seen.add(entry.url);
+                        filtered.push(entry);
+                        return filtered.length >= WORKSPACE_HISTORY_LIMIT;
+                    });
+
+                if (filtered.length === 0) {
+                    resolve([]);
+                    return;
+                }
+
+                Promise.all(filtered.map(entry => countHistoryEntry(entry, query))).then(resolve);
+            });
+        });
+    }
+
+    function countHistoryEntry(entry, query) {
+        return fetch(entry.url, { redirect: "follow", credentials: "omit" })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                const contentType = response.headers.get("content-type") || "";
+                if (!contentType.includes("text")) {
+                    throw new Error("Content not searchable (non-text response).");
+                }
+                return response.text();
+            })
+            .then(html => {
+                let textContent = "";
+                try {
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(html, "text/html");
+                    textContent = doc.body?.innerText || doc.documentElement?.innerText || "";
+                } catch (parseError) {
+                    console.warn("Failed to parse history entry:", entry.url, parseError);
+                }
+
+                const counts = window.advancedFindSearchUtils.countMatchesInText(
+                    textContent,
+                    query.terms,
+                    query.options,
+                    query.options.excludeTerm,
+                    window.advancedFindConfig?.config?.behavior?.excludeTermContextWords ?? 3
+                );
+
+                return {
+                    type: "history",
+                    title: entry.title || entry.url,
+                    url: entry.url,
+                    lastVisitTime: entry.lastVisitTime,
+                    totalMatches: counts.total,
+                    perTerm: counts.perTerm
+                };
+            })
+            .catch(error => ({
+                type: "history",
+                title: entry.title || entry.url,
+                url: entry.url,
+                lastVisitTime: entry.lastVisitTime,
+                totalMatches: 0,
+                perTerm: query.terms.map(term => ({ term, count: 0 })),
+                error: error.message || String(error)
+            }));
+    }
+
+    function focusWorkspaceTab(result) {
+        if (!result || typeof result.tabId !== "number") return;
+        const activateTab = () => {
+            chrome.tabs.update(result.tabId, { active: true }, () => void chrome.runtime.lastError);
+        };
+        if (typeof result.windowId === "number") {
+            chrome.windows.update(result.windowId, { focused: true }, () => {
+                if (chrome.runtime.lastError) {
+                    console.warn("Failed to focus window:", chrome.runtime.lastError.message);
+                }
+                activateTab();
+            });
+        } else {
+            activateTab();
+        }
+    }
+
+    function highlightWorkspaceTab(result) {
+        if (!result || typeof result.tabId !== "number") return;
+        if (!workspaceState.lastQuery) {
+            updateWorkspaceStatus("Run a workspace scan before highlighting.", true);
+            return;
+        }
+
+        focusWorkspaceTab(result);
+
+        const highlightOptions = {
+            caseSensitive: workspaceState.lastQuery.options.caseSensitive,
+            wholeWords: workspaceState.lastQuery.options.wholeWords,
+            ignoreDiacritics: workspaceState.lastQuery.options.ignoreDiacritics,
+            excludeTerm: workspaceState.lastQuery.options.excludeTerm,
+            useRegex: workspaceState.lastQuery.options.useRegex,
+            isProximity: false
+        };
+
+        chrome.tabs.sendMessage(result.tabId, {
+            type: "SEARCH_TEXT",
+            payload: {
+                searchTerms: workspaceState.lastQuery.terms,
+                options: highlightOptions
+            }
+        }, (response) => {
+            if (chrome.runtime.lastError) {
+                const message = chrome.runtime.lastError.message;
+                if (!message.includes("Receiving end does not exist")) {
+                    console.error("Failed to highlight workspace tab:", message);
+                    updateWorkspaceStatus("Could not highlight tab (content script not available).", true);
+                }
+                return;
+            }
+            if (response && response.success) {
+                updateWorkspaceStatus(`Highlighted ${response.count || 0} matches in the selected tab.`);
+            } else {
+                updateWorkspaceStatus("Highlight request failed in the selected tab.", true);
+            }
+        });
+    }
+
+    function openHistoryResult(result) {
+        if (!result?.url) return;
+        chrome.tabs.create({ url: result.url }, (tab) => {
+            if (chrome.runtime.lastError) {
+                updateWorkspaceStatus("Unable to open history entry.", true);
+                console.error("Failed to open history result:", chrome.runtime.lastError.message);
+            } else {
+                updateWorkspaceStatus("Opened history entry in a new tab.");
+            }
+        });
+    }
+
     // --- Mode Switching ---
     function switchToRegexMode() {
         

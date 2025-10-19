@@ -13,6 +13,7 @@
   <script src="modules/config.js"></script> <!-- Config needed early -->
   <script src="modules/export-highlights.js"></script>
   <script src="modules/live-search.js"></script>
+  <script src="modules/search-utils.js"></script>
   <script src="popup.js"></script>
 </head>
 <body>
@@ -130,6 +131,39 @@
       <ul id="recent-searches-list">
         <!-- Items populated by JS -->
       </ul>
+    </div>
+
+    <!-- Workspace Search -->
+    <div id="workspace-section" class="section-box">
+      <div class="workspace-header">
+        <h3 class="section-title">Workspace Search</h3>
+        <button id="workspaceRefreshButton" class="icon-button" aria-label="Refresh workspace results" title="Refresh results">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="23 4 23 10 17 10"></polyline>
+            <polyline points="1 20 1 14 7 14"></polyline>
+            <path d="M3.51 9a9 9 0 0 1 14.13-3.36L23 10"></path>
+            <path d="M20.49 15a9 9 0 0 1-14.13 3.36L1 14"></path>
+          </svg>
+        </button>
+      </div>
+      <div class="workspace-controls">
+        <input type="text" id="workspaceSearchInput" placeholder="Search across open tabs" aria-label="Workspace search term" />
+        <button id="workspaceSearchButton" class="secondary-button">Scan Workspace</button>
+      </div>
+      <div class="workspace-options">
+        <label class="checkbox-label">
+          <input type="checkbox" id="workspaceIncludeHistory" />
+          Include recent history (last 10)
+        </label>
+        <label class="checkbox-label">
+          <input type="checkbox" id="workspaceAllWindows" />
+          All windows
+        </label>
+      </div>
+      <div id="workspace-status" class="status-message" aria-live="polite"></div>
+      <div id="workspace-results" role="list">
+        <!-- Results rendered dynamically -->
+      </div>
     </div>
 
     <!-- Settings Panel (Modal Style) -->

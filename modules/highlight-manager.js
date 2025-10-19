@@ -185,7 +185,7 @@
                                          className: className,
                                          acrossElements: true, // Usually desired
                                          separateWordSearch: false, // Important for multi-word terms
-                                         ignoreDiacritics: options.ignoreDiacritics || false,
+                                         diacritics: !!options.ignoreDiacritics,
                                          caseSensitive: options.caseSensitive || false,
                                          filter: filterCallback, // Apply exclusion filter
                                          each: (element) => {
@@ -350,7 +350,7 @@
                                     className: `${highlightConfig.baseClass} ${highlightConfig.proximityHighlightClass}`, // Specific class for proximity
                                     acrossElements: true,
                                     separateWordSearch: false, // Treat the whole match as one
-                                    ignoreDiacritics: options.ignoreDiacritics || false,
+                                    diacritics: !!options.ignoreDiacritics,
                                     caseSensitive: options.caseSensitive || false, 
                                     filter: filterCallback, // Apply exclusion
                                     each: (element) => {

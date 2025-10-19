@@ -85,7 +85,7 @@
         const styleElement = document.createElement("style");
         styleElement.id = 'afe-highlight-style';
         styleElement.textContent = `
-            .${config.highlight.highlightClass} {
+            .${config.highlight.baseClass} {
                 background-color: yellow !important;
                 color: black !important;
                 padding: 0.1em !important;
@@ -101,8 +101,8 @@
                 text-shadow: none !important;
             }
             
-            :host .${config.highlight.highlightClass},
-            ::slotted(.${config.highlight.highlightClass}) {
+            :host .${config.highlight.baseClass},
+            ::slotted(.${config.highlight.baseClass}) {
                 background-color: yellow !important;
                 color: black !important;
             }

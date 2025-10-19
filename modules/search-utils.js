@@ -1,4 +1,6 @@
 (() => {
+    const DIACRITICS_REGEX = /[\u0300-\u036f]/g;
+
     /**
      * Creates a RegExp object for searching.
      * Handles standard text, regex input, wildcards (*), case sensitivity, whole words, and diacritics.
@@ -19,72 +21,126 @@
         let regexFlags = caseSensitive ? "g" : "gi";
 
         if (useRegex) {
-            // User provided regex - use it directly, but check validity
             try {
-                new RegExp(searchTerm); // Test if valid
-                console.log("Creating regex (user regex mode):", searchTerm, regexFlags);
-                // Note: ignoreDiacritics is harder to apply automatically to user regex.
-                // Mark.js might handle 'ignoreDiacritics' separately.
+                new RegExp(searchTerm);
             } catch (error) {
-                console.error("Invalid user-provided regular expression:", searchTerm, error);
                 throw new Error(`Invalid regular expression: ${error.message}`);
             }
-            // Return the user's regex string; Mark.js will compile it.
-             // We return the RegExp object directly here for consistency
-             return new RegExp(regexString, regexFlags);
-
+            return new RegExp(regexString, regexFlags);
         } else {
-            // Standard search term processing
-             let processedTerm = searchTerm;
+            let processedTerm = searchTerm;
 
-             // 1. Handle Wildcards (*) before escaping other characters
-             if (processedTerm.includes('*')) {
-                 // Split by *, escape each part, join with non-greedy wildcard
-                 processedTerm = processedTerm
-                     .split('*')
-                     .map(part => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")) // Escape regex chars in parts
-                     .join('.*?'); // Join with non-greedy wildcard
-             } else {
-                 // No wildcards, just escape the whole term
-                 processedTerm = processedTerm.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-             }
+            if (processedTerm.includes('*')) {
+                processedTerm = processedTerm
+                    .split('*')
+                    .map(part => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+                    .join('.*?');
+            } else {
+                processedTerm = processedTerm.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+            }
 
-
-            // 2. Add word boundaries if required
             const wordBoundary = wholeWords ? "\\b" : "";
             regexString = `${wordBoundary}${processedTerm}${wordBoundary}`;
 
-            // 3. Handle Diacritics (Mark.js usually handles this via its own option,
-            // but creating a regex that ignores them is complex. Rely on Mark.js option for now)
-            if (ignoreDiacritics) {
-                console.warn("ignoreDiacritics=true: Relying on Mark.js internal handling. Regex itself won't ignore diacritics.");
-                 // Advanced (complex): Could try to replace characters with classes like [aàáâãäå]
-                 // but this is difficult to do comprehensively.
+            try {
+                return new RegExp(regexString, regexFlags);
+            } catch (error) {
+                throw new Error(`Internal error creating regex: ${error.message}`);
             }
-
-            console.log("Creating regex (standard/wildcard mode):", regexString, regexFlags);
-             try {
-                 return new RegExp(regexString, regexFlags);
-             } catch (error) {
-                 console.error("Error creating regex from processed term:", regexString, error);
-                 throw new Error(`Internal error creating regex: ${error.message}`);
-             }
         }
     }
 
-    // --- findProximityMatches - Keep as is for now, proximity uses its own regex logic ---
-     function findProximityMatches(text, term1, term2, maxDistance, caseSensitive, wholeWords) {
-        // ... (This function might not be directly used by mark.js anymore,
-        //      but keep it if needed for other logic or future enhancements) ...
+    function findProximityMatches() {
+        console.warn("findProximityMatches is deprecated for the current implementation.");
+        return [];
+    }
 
-         // Let's refine the regex generation used internally by highlightProximity instead.
-         console.warn("findProximityMatches function might be deprecated if using mark.js's combined regex approach.");
-         return []; // Return empty array to signify deprecation if not used
-     }
+    function stripDiacritics(value = "") {
+        if (typeof value !== "string" || !value) return value || "";
+        return value.normalize("NFD").replace(DIACRITICS_REGEX, "");
+    }
 
+    function buildExcludeRegex(source, caseSensitive, treatAsRegex) {
+        if (!source) return null;
+        let pattern = source;
+        if (!treatAsRegex) {
+            pattern = source.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        }
+        try {
+            return new RegExp(pattern, caseSensitive ? "g" : "gi");
+        } catch (error) {
+            console.warn("Failed to initialise exclusion regex:", error);
+            return null;
+        }
+    }
+
+    function countMatchesInText(rawText, terms, options = {}, excludeTerm = "", excludeContextWords = 3) {
+        const text = typeof rawText === "string" ? rawText : "";
+        const searchTerms = Array.isArray(terms) ? terms : [];
+        if (!text || searchTerms.length === 0) {
+            return { total: 0, perTerm: searchTerms.map(term => ({ term, count: 0 })) };
+        }
+
+        const {
+            caseSensitive = false,
+            wholeWords = false,
+            useRegex = false,
+            ignoreDiacritics = false
+        } = options || {};
+
+        const allowNormalization = ignoreDiacritics && !useRegex;
+        const processedText = allowNormalization ? stripDiacritics(text) : text;
+        const processedExclude = allowNormalization ? stripDiacritics(excludeTerm) : excludeTerm;
+        const excludeRegex = buildExcludeRegex(processedExclude, caseSensitive, useRegex);
+        const contextRadius = Math.max(0, excludeContextWords | 0) * 40;
+
+        const perTerm = searchTerms.map(originalTerm => {
+            if (!originalTerm) return { term: originalTerm, count: 0 };
+
+            const workingTerm = allowNormalization ? stripDiacritics(originalTerm) : originalTerm;
+            let regex;
+            try {
+                regex = createSearchRegex(workingTerm, caseSensitive, wholeWords, useRegex, false);
+            } catch (error) {
+                return { term: originalTerm, count: 0, error: error.message };
+            }
+
+            let count = 0;
+            let match;
+            regex.lastIndex = 0;
+
+            while ((match = regex.exec(processedText)) !== null) {
+                if (excludeRegex) {
+                    const start = Math.max(0, match.index - contextRadius);
+                    const end = Math.min(processedText.length, regex.lastIndex + contextRadius);
+                    const slice = processedText.slice(start, end);
+                    excludeRegex.lastIndex = 0;
+                    if (excludeRegex.test(slice)) {
+                        if (regex.lastIndex === match.index) {
+                            regex.lastIndex += match[0]?.length || 1;
+                        }
+                        continue;
+                    }
+                }
+
+                count++;
+
+                if (!match[0] || match[0].length === 0) {
+                    regex.lastIndex += 1;
+                }
+            }
+
+            return { term: originalTerm, count };
+        });
+
+        const total = perTerm.reduce((sum, entry) => sum + (entry.count || 0), 0);
+        return { total, perTerm };
+    }
 
     window.advancedFindSearchUtils = {
         createSearchRegex,
-        findProximityMatches // Keep exposed, but note potential deprecation
+        findProximityMatches,
+        stripDiacritics,
+        countMatchesInText
     };
 })();

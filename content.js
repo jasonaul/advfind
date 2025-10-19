@@ -305,6 +305,31 @@
             let isAsync = false;
 
             switch (request.type) {
+                case "COUNT_MATCHES":
+                    if (!request.payload || !Array.isArray(request.payload.searchTerms)) {
+                        console.error("Invalid COUNT_MATCHES payload:", request.payload);
+                        sendResponse({ success: false, error: "Invalid search terms payload." });
+                        break;
+                    }
+                    try {
+                        const bodyText = document.body?.innerText || document.documentElement?.innerText || "";
+                        const options = request.payload.options || {};
+                        const excludeTerm = options.excludeTerm || "";
+                        const contextWords = window.advancedFindConfig?.config?.behavior?.excludeTermContextWords ?? 3;
+                        const counts = window.advancedFindSearchUtils.countMatchesInText(
+                            bodyText,
+                            request.payload.searchTerms,
+                            options,
+                            excludeTerm,
+                            contextWords
+                        );
+                        sendResponse({ success: true, total: counts.total, perTerm: counts.perTerm });
+                    } catch (error) {
+                        console.error("COUNT_MATCHES failed:", error);
+                        sendResponse({ success: false, error: error.message });
+                    }
+                    break;
+
                 case "SEARCH_TEXT":
                     if (!request.payload || !request.payload.searchTerms || !Array.isArray(request.payload.searchTerms)) {
                          console.error("Invalid SEARCH_TEXT payload:", request.payload);
