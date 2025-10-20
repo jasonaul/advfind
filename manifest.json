@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "Advanced Find Extension",
-    "version": "1.00.00", 
+    "version": "1.1.00", 
     "description": "Advanced text finding, highlighting, and export extension",
     "author": "Jason Aul",
     "icons": {
@@ -26,9 +26,10 @@
             "modules/dom-utils.js",
             "modules/search-utils.js",
             "modules/highlight-manager.js",
-            "modules/persistent-highlights.js", 
-            "modules/export-highlights.js",   
-            "modules/live-search.js",       
+            "modules/persistent-highlights.js",
+            "modules/export-highlights.js",
+            "modules/live-search.js",
+            "modules/pattern-library.js",
             "popup.html",
             "popup.css",
             "popup.js",

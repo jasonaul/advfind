@@ -17,6 +17,24 @@ document.addEventListener("DOMContentLoaded", () => {
         isScanning: false
     };
 
+    const patternState = {
+        categories: [],
+        selectedCategoryId: null,
+        selectedPatternId: null
+    };
+
+    const MODES = Object.freeze({
+        STANDARD: "standard",
+        REGEX: "regex",
+        PROXIMITY: "proximity"
+    });
+    const MODE_PANELS = {
+        [MODES.STANDARD]: "standard-mode",
+        [MODES.REGEX]: "regex-mode",
+        [MODES.PROXIMITY]: "proximity-mode"
+    };
+    let currentMode = MODES.STANDARD;
+
   const listeners = []; // Store listeners to remove them later
   
     // --- Initialization ---
@@ -33,11 +51,11 @@ document.addEventListener("DOMContentLoaded", () => {
                 if (!url || restrictedPrefixes.some(prefix => url.startsWith(prefix)) || !allowedPrefixes.some(prefix => url.startsWith(prefix))) {
                     const simpleUrl = url ? url.split('/')[0] : 'N/A';
                     console.warn(`[Popup] Cannot run on this page type: ${simpleUrl}`);
-                    updateStatus(`Error: Cannot run on ${simpleUrl} pages`, true);
+                    updateStatus(`Error: Cannot run on ${simpleUrl} pages`, "error");
                     disableUI();
                     return;
                 }
-                if (url.startsWith('file://')) { updateStatus("Warning: May not work correctly on local file URLs.", false); }
+                if (url.startsWith('file://')) { updateStatus("Warning: May not work correctly on local file URLs."); }
 
                 activeTabId = tab.id;
                 
@@ -46,10 +64,11 @@ document.addEventListener("DOMContentLoaded", () => {
                     checkContentScript(); // Check connection AFTER settings are ready
                     renderSearchHistory();
                     renderWorkspaceResults();
+                    initializePatternLibrary();
                 });
             } else {
                 console.error("[Popup] No active tab found in query.");
-                updateStatus("Error: No active tab found", true);
+                updateStatus("Error: No active tab found", "error");
                 disableUI();
             }
         });
@@ -152,28 +171,102 @@ document.addEventListener("DOMContentLoaded", () => {
          
     }
   
-    function updateStatus(message, isError = false) {
-        const statusElement = document.getElementById("status");
-        const regexStatusElement = document.getElementById("regex-status");
-        // Determine which status element is currently visible
-        const standardModeVisible = !document.getElementById("standard-mode")?.classList.contains("hidden");
-        const targetStatusElement = standardModeVisible ? statusElement : regexStatusElement;
-  
-        if (targetStatusElement) {
-            targetStatusElement.textContent = message;
-            targetStatusElement.classList.toggle('error', isError);
-            targetStatusElement.classList.toggle('success', !isError && message.toLowerCase().includes('found')); // Add success class for counts
-        } else if (statusElement) { // Fallback
-            statusElement.textContent = message;
-            statusElement.classList.toggle('error', isError);
-            statusElement.classList.toggle('success', !isError && message.toLowerCase().includes('found'));
+    function getModeStatusId(mode) {
+        switch (mode) {
+            case MODES.REGEX:
+                return "regex-status";
+            case MODES.PROXIMITY:
+                return "proximity-status";
+            default:
+                return "status";
+        }
+    }
+
+    function setStatus(targetId, message = "", type = "info") {
+        const element = document.getElementById(targetId);
+        if (!element) return;
+
+        element.textContent = message;
+        element.classList.remove("error", "success", "loading");
+
+        if (!message) return;
+
+        if (type === "error") {
+            element.classList.add("error");
+        } else if (type === "success") {
+            element.classList.add("success");
+        } else if (type === "loading") {
+            element.classList.add("loading");
+        }
+    }
+
+    function clearAllModeStatuses() {
+        setStatus("status");
+        setStatus("regex-status");
+        setStatus("proximity-status");
+    }
+
+    function updateStatus(message, type = "info") {
+        const targetId = getModeStatusId(currentMode);
+        setStatus(targetId, message, type);
+    }
+
+    function setInputError(inputElement, message, statusId) {
+        if (!inputElement) return;
+        inputElement.classList.add("input-error");
+        inputElement.setAttribute("aria-invalid", "true");
+        setStatus(statusId, message, "error");
+    }
+
+    function clearInputError(inputElement) {
+        if (!inputElement) return;
+        inputElement.classList.remove("input-error");
+        inputElement.removeAttribute("aria-invalid");
+    }
+
+    function switchMode(mode, { focusInput = true } = {}) {
+        if (!Object.values(MODES).includes(mode)) {
+            mode = MODES.STANDARD;
+        }
+
+        currentMode = mode;
+
+        const modeButtons = document.querySelectorAll('.mode-button');
+        modeButtons.forEach(button => {
+            const isActive = button.dataset.mode === mode;
+            button.classList.toggle('active', isActive);
+            button.setAttribute('aria-selected', String(isActive));
+        });
+
+        Object.entries(MODE_PANELS).forEach(([key, panelId]) => {
+            const panel = document.getElementById(panelId);
+            if (!panel) return;
+            const shouldShow = key === mode;
+            panel.classList.toggle('hidden', !shouldShow);
+            panel.setAttribute('aria-hidden', shouldShow ? 'false' : 'true');
+        });
+
+        Object.values(MODES).forEach(otherMode => {
+            if (otherMode !== mode) {
+                setStatus(getModeStatusId(otherMode));
+            }
+        });
+
+        if (!focusInput) return;
+
+        if (mode === MODES.STANDARD) {
+            document.getElementById('searchTermInput')?.focus();
+        } else if (mode === MODES.REGEX) {
+            document.getElementById('regexSearchInput')?.focus();
+        } else if (mode === MODES.PROXIMITY) {
+            document.getElementById('proximityTerm1')?.focus();
         }
     }
   
   
     // --- Content Script Injection & Communication ---
     function checkContentScript() {
-        if (!activeTabId) { console.error("[Popup] No active tab ID available for checkContentScript"); updateStatus("Error: Tab communication failed", true); disableUI(); return; }
+        if (!activeTabId) { console.error("[Popup] No active tab ID available for checkContentScript"); updateStatus("Error: Tab communication failed", "error"); disableUI(); return; }
 
         
       chrome.tabs.sendMessage(activeTabId, { type: "CHECK_INJECTION" }, (response) => {
@@ -191,7 +284,7 @@ document.addEventListener("DOMContentLoaded", () => {
           } else {
               
               // Optional: Show "Initializing..." status briefly
-              updateStatus("Initializing extension on page...");
+              updateStatus("Initializing extension on page...", "loading");
               injectContentScript();
           }
       });
@@ -205,7 +298,7 @@ document.addEventListener("DOMContentLoaded", () => {
        const restrictedPrefixes = ['chrome://', 'edge://', 'chrome-extension://', 'about:', 'view-source:'];
       if (url && restrictedPrefixes.some(prefix => url.startsWith(prefix))) {
           console.error("Connection error likely due to restricted page. Stopping.");
-          updateStatus("Error: Cannot connect to this page type", true);
+          updateStatus("Error: Cannot connect to this page type", "error");
           disableUI();
           retryCount = 0; // Reset retries
           return;
@@ -214,11 +307,11 @@ document.addEventListener("DOMContentLoaded", () => {
   
       if (retryCount < MAX_RETRIES) {
         retryCount++;
-        updateStatus(`Connecting (${retryCount}/${MAX_RETRIES})...`);
+        updateStatus(`Connecting (${retryCount}/${MAX_RETRIES})...`, "loading");
         setTimeout(checkContentScript, RETRY_DELAY * retryCount); // Just re-check, don't inject again
     } else {
         console.error("[Popup] MAX RETRIES REACHED. Failed to establish connection with content script.");
-        updateStatus("Error: Failed to connect to page content", true);
+        updateStatus("Error: Failed to connect to page content", "error");
         disableUI();
         retryCount = 0; // Reset for future attempts maybe?
     }
@@ -231,7 +324,7 @@ document.addEventListener("DOMContentLoaded", () => {
         // Although background.js injects config.js first, being explicit can help debugging.
         if (!window.advancedFindConfig) {
             console.error("Config module not loaded before injection attempt!");
-            updateStatus("Error: Extension files missing", true);
+            updateStatus("Error: Extension files missing", "error");
             disableUI();
             return;
         }
@@ -254,15 +347,15 @@ document.addEventListener("DOMContentLoaded", () => {
         }).catch(error => {
             console.error("Failed to inject content script:", error);
             if (error.message.includes("Cannot access") || error.message.includes("extension context invalidated")) {
-                updateStatus("Error: Cannot access this page", true);
+                updateStatus("Error: Cannot access this page", "error");
             } else if (error.message.includes("Missing host permission")) {
-                 updateStatus("Error: Extension needs permission for this URL", true);
+                 updateStatus("Error: Extension needs permission for this URL", "error");
                  // Consider adding a button/link to request permissions if possible/desired
             } else if (error.message.includes("Failed to load")) {
-                 updateStatus("Error: Could not load extension files", true);
+                 updateStatus("Error: Could not load extension files", "error");
             }
             else {
-                updateStatus("Error: Failed to initialize on page", true);
+                updateStatus("Error: Failed to initialize on page", "error");
             }
             disableUI();
             retryCount = 0; // Reset retries after injection failure
@@ -277,28 +370,25 @@ document.addEventListener("DOMContentLoaded", () => {
            return;
        }
        
-       updateStatus("Ready");
        enableUI();
 
-       removeEventListeners(); // Clean up first
-       setupEventListeners();  // Add fresh listeners
+       removeEventListeners();
+       setupEventListeners();
 
-       // Setup specific UI sections
-       setupProximitySearchUI();
        setupSettingsPanel();
        setupRegexMode();
 
-       // Initialize Live Search (if module exists)
-       if (window.advancedFindLiveSearch) { window.advancedFindLiveSearch.initializeLiveSearch(activeTabId, contentScriptReady); window.advancedFindLiveSearch.setupLiveSearchEventListeners(); } else { console.error("[Popup] Live Search module not found!"); }
+       if (window.advancedFindLiveSearch) {
+           window.advancedFindLiveSearch.initializeLiveSearch(activeTabId, contentScriptReady);
+           window.advancedFindLiveSearch.setupLiveSearchEventListeners();
+       } else {
+           console.error("[Popup] Live Search module not found!");
+       }
 
-       // Set initial mode
-       returnToStandardMode();
-       setupProximitySearchUI(); // Ensure proximity visibility is correct after mode switch
-
-       // **** RUN SYNC LAST ****
-       syncInitialToggleStates(); // Ensure visuals match state AFTER everything else is set up
-
-       // Keep this log last if preferred
+       clearAllModeStatuses();
+       switchMode(currentMode, { focusInput: false });
+       syncInitialToggleStates();
+       updateStatus("Ready");
    }
   
   
@@ -306,10 +396,6 @@ document.addEventListener("DOMContentLoaded", () => {
    function addListener(element, event, handler) { if (element) { element.addEventListener(event, handler); listeners.push({ element, event, handler }); } else { console.warn(`[Popup] Cannot add listener: Element not found for event ${event}`); } }
   
    function removeEventListeners() { listeners.forEach(({ element, event, handler }) => { if (element) { element.removeEventListener(event, handler); } }); listeners.length = 0; }
-
-      // --- Checkbox & Radio State Class Handling ---
-      const toggleInputs = document.querySelectorAll('.checkbox-label input[type="checkbox"], .radio-label input[type="radio"]');
-
       function handleToggleChange(event) {
         const input = event.target;
         const label = input.closest('.checkbox-label, .radio-label');
@@ -329,17 +415,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
-      // Add listeners using our tracked method
-      toggleInputs.forEach(input => {
-          addListener(input, 'change', handleToggleChange);
-          // No need to set initial state here, syncInitialToggleStates will handle it after UI is built
-      });
-  
-      function setupEventListeners() {
-        // Log start
-    
-        // --- Get Element References ---
-        // (It's good practice to get references here, even if addListener checks later)
+    function setupEventListeners() {
         const searchButton = document.getElementById("searchButton");
         const searchInput = document.getElementById("searchTermInput");
         const clearButton = document.getElementById("clearButton");
@@ -353,9 +429,6 @@ document.addEventListener("DOMContentLoaded", () => {
         const regexExportButton = document.getElementById("regexExportButton");
         const regexNextButton = document.getElementById("regexNextButton");
         const regexPrevButton = document.getElementById("regexPrevButton");
-        const returnStandardModeButton = document.getElementById("returnStandardMode");
-        const regexCheckbox = document.getElementById("regexCheckbox");
-        const proximityCheckbox = document.getElementById("proximitySearchCheckbox");
         const settingsButton = document.getElementById('settings-button');
         const closeSettings = document.getElementById('close-settings');
         const regexHelpButton = document.getElementById("regexHelpButton");
@@ -363,105 +436,84 @@ document.addEventListener("DOMContentLoaded", () => {
         const restoreDefaultButton = document.getElementById('restore-default-color');
         const settingsPanel = document.getElementById('settings-panel');
         const helpModal = document.getElementById("regexHelpModal");
-        const ignoreDiacriticsSettingsChk = document.getElementById('ignoreDiacriticsSettingsCheckbox'); // Get settings checkbox
-        const searchHistoryEnabledChk = document.getElementById('searchHistoryEnabled'); // Get settings checkbox
-        const persistentHighlightsEnabledChk = document.getElementById('persistentHighlightsEnabled'); // Get settings checkbox
         const workspaceSearchButton = document.getElementById("workspaceSearchButton");
         const workspaceSearchInput = document.getElementById("workspaceSearchInput");
         const workspaceRefreshButton = document.getElementById("workspaceRefreshButton");
-    
-    
-        // --- Checkbox & Radio State Handling ---
-        // Select inputs INSIDE the correct labels
-        const toggleInputs = document.querySelectorAll('.checkbox-label input[type="checkbox"], .radio-label input[type="radio"]');
-    
-        // --- CRUCIAL DEBUGGING LOG ---
-        
-        if (toggleInputs.length === 0) {
-             console.error("[Popup] !!! NO TOGGLE INPUTS FOUND by selector - Checkbox/Radio listeners will NOT be added. Verify HTML structure and CSS classes (.checkbox-label, .radio-label) match the querySelectorAll string. !!!");
-        } else {
-             // Log the NodeList
-        }
-        // --- END CRUCIAL DEBUGGING LOG ---
-    
-        // Add listeners using our tracked method, LOGGING each addition
-        toggleInputs.forEach(input => {
-            // --- DEBUGGING ---
-            
-            // --- END DEBUGGING ---
-            addListener(input, 'change', handleToggleChange); // Use the tracked addListener
+        const patternCategorySelect = document.getElementById("patternCategorySelect");
+        const patternSelect = document.getElementById("patternSelect");
+        const patternRunButton = document.getElementById("patternRunButton");
+        const patternWorkspaceButton = document.getElementById("patternWorkspaceButton");
+        const patternApplyButton = document.getElementById("patternApplyButton");
+
+        const modeButtons = document.querySelectorAll('.mode-button');
+        modeButtons.forEach(button => {
+            addListener(button, "click", () => {
+                const desiredMode = button.dataset.mode;
+                if (desiredMode) {
+                    switchMode(desiredMode);
+                }
+            });
         });
-    
-    
-        // --- Add Listeners for Other Controls (using addListener helper) ---
-    
-        // Standard Search Button & Input
+
+        const toggleInputs = document.querySelectorAll('.checkbox-label input[type="checkbox"], .radio-label input[type="radio"]');
+        toggleInputs.forEach(input => addListener(input, 'change', handleToggleChange));
+
         addListener(searchButton, "click", () => {
-            if (!searchInput || proximityCheckbox?.checked) return;
+            if (!searchInput) return;
             const currentTerm = searchInput.value.trim();
-            if (!currentTerm) return;
-            if (currentTerm === lastExplicitSearchTerm) { handleNavigation("next"); }
-            else { lastExplicitSearchTerm = currentTerm; handleSearch(currentTerm); saveSearchHistory(currentTerm); }
+            if (!currentTerm) {
+                clearInputError(searchInput);
+                setInputError(searchInput, "Please enter a search term.", getModeStatusId(MODES.STANDARD));
+                return;
+            }
+            clearInputError(searchInput);
+            if (currentTerm === lastExplicitSearchTerm && currentMode === MODES.STANDARD) {
+                handleNavigation("next");
+            } else {
+                switchMode(MODES.STANDARD, { focusInput: false });
+                lastExplicitSearchTerm = currentTerm;
+                handleSearch(currentTerm);
+                saveSearchHistory(currentTerm);
+            }
         });
         addListener(searchInput, "keyup", (event) => { if (event.key === "Enter") searchButton?.click(); });
-    
-        // Clear Buttons
+
         addListener(clearButton, "click", handleClear);
         addListener(regexClearButton, "click", handleClear);
-    
-        // Navigation Buttons
+
         addListener(nextButton, "click", () => handleNavigation("next"));
         addListener(prevButton, "click", () => handleNavigation("previous"));
         addListener(regexNextButton, "click", () => handleNavigation("next"));
         addListener(regexPrevButton, "click", () => handleNavigation("previous"));
-    
-        // Proximity Controls
-        addListener(searchProximityButton, "click", handleProximitySearch);
-        addListener(proximityCheckbox, "change", (event) => {
-          if (!proximityCheckbox) return; // Guard
-          const proximitySearchContainer = document.getElementById("proximity-controls");
-          if (!proximitySearchContainer) return;
-          const isChecked = event.target.checked;
-          
-          proximitySearchContainer.classList.toggle("hidden", !isChecked);
-           if (isChecked) {
-                if(regexCheckbox) regexCheckbox.checked = false; // Turn off regex mode if turning on prox
-                handleToggleChange({ target: regexCheckbox }); // Manually trigger visual update for regex toggle if needed
-                returnToStandardMode(); // Ensure standard mode is visible
-                handleClear(); // Clear previous results/inputs
-                if(searchInput) searchInput.value = ''; // Ensure standard input visually cleared
-                updateStatus("Proximity search active.");
-                document.getElementById("proximityTerm1")?.focus();
-           } else {
-                updateStatus("");
-           }
-       });
-    
-        // Export Buttons
-        addListener(exportButton, "click", handleExportHighlights);
-        addListener(regexExportButton, "click", handleExportHighlights);
-    
-        // Regex Mode Specific
-        addListener(regexSearchButton, "click", () => {
-             if (!regexInput) return;
-            const currentTerm = regexInput.value.trim();
-             if (!currentTerm) return;
-             const isRegexModeVisible = !document.getElementById("regex-mode")?.classList.contains("hidden");
-             if (isRegexModeVisible && currentTerm === lastExplicitSearchTerm) { handleNavigation("next"); }
-             else { lastExplicitSearchTerm = currentTerm; handleRegexSearch(currentTerm); saveSearchHistory(currentTerm); }
-        });
-        addListener(regexInput, "keyup", (event) => { if (event.key === "Enter") regexSearchButton?.click(); });
-        addListener(returnStandardModeButton, "click", () => {
-            if(regexCheckbox) regexCheckbox.checked = false; // Uncheck the toggle
-            handleToggleChange({ target: regexCheckbox }); // Manually trigger visual update for toggle
-             returnToStandardMode();
-        });
-        addListener(regexCheckbox, "change", (e) => { // Mode toggle checkbox
-             // The handleToggleChange listener ALREADY handles the visual is-checked class
-             if (e.target.checked) switchToRegexMode(); else returnToStandardMode();
+
+        addListener(searchProximityButton, "click", () => {
+            switchMode(MODES.PROXIMITY, { focusInput: false });
+            handleProximitySearch();
         });
 
-        // Workspace Search
+        addListener(exportButton, "click", handleExportHighlights);
+        addListener(regexExportButton, "click", handleExportHighlights);
+
+        addListener(regexSearchButton, "click", () => {
+            if (!regexInput) return;
+            const currentTerm = regexInput.value.trim();
+            if (!currentTerm) {
+                clearInputError(regexInput);
+                setInputError(regexInput, "Enter a regex pattern.", getModeStatusId(MODES.REGEX));
+                return;
+            }
+            clearInputError(regexInput);
+            switchMode(MODES.REGEX, { focusInput: false });
+            if (currentTerm === lastExplicitSearchTerm && currentMode === MODES.REGEX) {
+                handleNavigation("next");
+            } else {
+                lastExplicitSearchTerm = currentTerm;
+                handleRegexSearch(currentTerm);
+                saveSearchHistory(currentTerm);
+            }
+        });
+        addListener(regexInput, "keyup", (event) => { if (event.key === "Enter") regexSearchButton?.click(); });
+
         addListener(workspaceSearchButton, "click", () => runWorkspaceSearch());
         addListener(workspaceRefreshButton, "click", () => runWorkspaceSearch({ reuseLast: true }));
         addListener(workspaceSearchInput, "keydown", (event) => {
@@ -470,37 +522,34 @@ document.addEventListener("DOMContentLoaded", () => {
                 runWorkspaceSearch();
             }
         });
-    
-        // Regex Options Radios (listeners added in setupRegexMode via addListener)
-    
-        // Settings Panel
+
+        addListener(patternCategorySelect, "change", (event) => handlePatternCategoryChange(event.target.value));
+        addListener(patternSelect, "change", (event) => handlePatternSelectChange(event.target.value));
+        addListener(patternRunButton, "click", runSelectedPatternOnActiveTab);
+        addListener(patternWorkspaceButton, "click", runSelectedPatternWorkspaceScan);
+        addListener(patternApplyButton, "click", loadPatternIntoSearch);
+
         addListener(settingsButton, 'click', () => settingsPanel?.classList.remove('hidden'));
         addListener(closeSettings, 'click', () => settingsPanel?.classList.add('hidden'));
         addListener(settingsPanel, 'click', (e) => { if (e.target === settingsPanel) settingsPanel.classList.add('hidden'); });
         addListener(restoreDefaultButton, 'click', () => {
-           if (highlightColorPicker && window.advancedFindConfig) {
+            if (highlightColorPicker && window.advancedFindConfig) {
                 const defaultColor = window.advancedFindConfig.config.settings.defaultHighlightColor || "#ffff00";
                 highlightColorPicker.value = defaultColor;
-                highlightColorPicker.dispatchEvent(new Event('change', { bubbles: true })); // Trigger change
-           }
-       });
-        const settingsInputs = settingsPanel?.querySelectorAll('input, select'); // Select ALL inputs in settings
-        settingsInputs?.forEach(input => {
-            // Add the generic setting change handler
-            addListener(input, 'change', handleSettingChange);
-            // *If* the input is a checkbox/radio, *also* add the visual toggle handler
-            if ((input.type === 'checkbox' || input.type === 'radio') && input.closest('.checkbox-label, .radio-label')) {
-                 
-                 addListener(input, 'change', handleToggleChange);
+                highlightColorPicker.dispatchEvent(new Event('change', { bubbles: true }));
             }
         });
-    
-        // Regex Help Modal
+        const settingsInputs = settingsPanel?.querySelectorAll('input, select');
+        settingsInputs?.forEach(input => {
+            addListener(input, 'change', handleSettingChange);
+            if ((input.type === 'checkbox' || input.type === 'radio') && input.closest('.checkbox-label, .radio-label')) {
+                addListener(input, 'change', handleToggleChange);
+            }
+        });
+
         addListener(regexHelpButton, "click", () => helpModal?.classList.remove("hidden"));
         addListener(regexHelpClose, "click", () => helpModal?.classList.add("hidden"));
         addListener(helpModal, 'click', (e) => { if (e.target === helpModal) helpModal.classList.add('hidden'); });
-    
-        // Log end
     }
       // --- New function to sync initial states ---
       function syncInitialToggleStates() {
@@ -540,8 +589,8 @@ document.addEventListener("DOMContentLoaded", () => {
          // 2. Save settings to chrome.storage.sync
          chrome.storage.sync.set(currentSettings, () => {
              if(chrome.runtime.lastError) {
-                 console.error("Error saving settings:", chrome.runtime.lastError.message);
-                 updateStatus("Error saving settings", true);
+                console.error("Error saving settings:", chrome.runtime.lastError.message);
+                updateStatus("Error saving settings", "error");
              } else {
                  
                  // Update live config object immediately
@@ -603,10 +652,16 @@ document.addEventListener("DOMContentLoaded", () => {
     // --- Search Handlers ---
     function handleSearch(rawSearchTerm) {
         if (!contentScriptReady || !activeTabId) return;
+        switchMode(MODES.STANDARD, { focusInput: false });
   
         // Split by comma, trim, filter empty terms
         const terms = rawSearchTerm.split(',').map(t => t.trim()).filter(t => t);
-        if (terms.length === 0) { updateStatus("Please enter a search term.", true); return; }
+        const searchInput = document.getElementById("searchTermInput");
+        clearInputError(searchInput);
+        if (terms.length === 0) {
+            setInputError(searchInput, "Please enter a search term.", getModeStatusId(MODES.STANDARD));
+            return;
+        }
   
         const caseSensitive = document.getElementById("caseSensitiveCheckbox")?.checked || false;
         const wholeWords = document.getElementById("wholeWordsCheckbox")?.checked || false;
@@ -627,13 +682,20 @@ document.addEventListener("DOMContentLoaded", () => {
             isProximity: false, // Not a proximity search
         };
   
-        
-        updateStatus("Searching...");
+        updateStatus("Searching...", "loading");
         sendSearchMessage("SEARCH_TEXT", { searchTerms: processedTerms, options });
     }
   
     function handleRegexSearch(searchTerm) {
         if (!contentScriptReady || !activeTabId || !searchTerm) return;
+        switchMode(MODES.REGEX, { focusInput: false });
+
+        const regexInput = document.getElementById("regexSearchInput");
+        clearInputError(regexInput);
+        if (!searchTerm.trim()) {
+            setInputError(regexInput, "Enter a regex pattern.", getModeStatusId(MODES.REGEX));
+            return;
+        }
   
          const caseSensitive = document.getElementById("caseSensitiveCheckbox")?.checked || false;
          const ignoreDiacritics = document.getElementById('ignoreDiacriticsCheckbox')?.checked || false; // Use the GLOBAL checkbox
@@ -646,25 +708,48 @@ document.addEventListener("DOMContentLoaded", () => {
              isProximity: false,
          };
   
-         
-         updateStatus("Searching regex...");
+         updateStatus("Searching regex...", "loading");
          sendSearchMessage("SEARCH_TEXT", { searchTerms: [searchTerm], options });
      }
   
   
     function handleProximitySearch() {
         if (!contentScriptReady || !activeTabId) return;
+        switchMode(MODES.PROXIMITY, { focusInput: false });
   
         const term1 = document.getElementById("proximityTerm1")?.value.trim();
         const term2 = document.getElementById("proximityTerm2")?.value.trim();
         const proximityValue = parseInt(document.getElementById("proximityValue")?.value || "10", 10);
-  
+        const distanceTypeSelect = document.getElementById("proximityDistanceType");
+        const distanceType = distanceTypeSelect?.value === "chars" ? "chars" : "words";
+        const requireOrder = document.getElementById("proximityOrderCheckbox")?.checked || false;
+        const sameParagraph = document.getElementById("proximitySameParagraphCheckbox")?.checked || false;
+
+        const term1Input = document.getElementById("proximityTerm1");
+        const term2Input = document.getElementById("proximityTerm2");
+        const distanceInput = document.getElementById("proximityValue");
+        clearInputError(term1Input);
+        clearInputError(term2Input);
+        clearInputError(distanceInput);
+
         if (!term1 || !term2) {
-            updateStatus("Please enter both proximity terms.", true);
+            const warnings = [];
+            const statusId = getModeStatusId(MODES.PROXIMITY);
+            if (!term1) {
+                term1Input?.classList.add("input-error");
+                term1Input?.setAttribute("aria-invalid", "true");
+                warnings.push("Enter the first term.");
+            }
+            if (!term2) {
+                term2Input?.classList.add("input-error");
+                term2Input?.setAttribute("aria-invalid", "true");
+                warnings.push("Enter the second term.");
+            }
+            setStatus(statusId, warnings.join(' '), "error");
             return;
         }
          if (isNaN(proximityValue) || proximityValue < 1) {
-             updateStatus("Proximity distance must be 1 or greater.", true);
+             setInputError(distanceInput, "Distance must be 1 or greater.", getModeStatusId(MODES.PROXIMITY));
              return;
          }
   
@@ -679,20 +764,26 @@ document.addEventListener("DOMContentLoaded", () => {
   
   
         const options = {
-            caseSensitive, wholeWords, ignoreDiacritics, excludeTerm,
+            caseSensitive,
+            wholeWords,
+            ignoreDiacritics,
+            excludeTerm,
             useRegex: false, // Proximity uses specific internal regex logic
             isProximity: true, // Flag for highlight manager
+            distanceType,
+            requireOrder,
+            sameParagraph
         };
-  
+
         const payload = {
              searchTerm: term1,
              searchTerm2: term2,
              proximityValue: proximityValue,
              options: options
         };
-  
-        
-        updateStatus("Searching proximity...");
+
+         
+        updateStatus("Searching proximity...", "loading");
         sendSearchMessage("SEARCH_PROXIMITY", payload);
   
         saveSearchHistory(`${term1} ~${proximityValue}~ ${term2}`);
@@ -704,7 +795,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 // Don't show error if popup closed during async response
                 if (!chrome.runtime.lastError.message.includes("Receiving end does not exist")) {
                     console.error(`Error during ${type}:`, chrome.runtime.lastError.message);
-                    updateStatus("Search failed: " + chrome.runtime.lastError.message, true);
+                    updateStatus("Search failed: " + chrome.runtime.lastError.message, "error");
                      if (chrome.runtime.lastError.message.includes("Could not establish connection")) {
                          contentScriptReady = false; // Mark as not ready
                          checkContentScript(); // Attempt to reconnect/reinject
@@ -715,7 +806,7 @@ document.addEventListener("DOMContentLoaded", () => {
             } else if (response) {
                 
                 if (response.success) {
-                     updateStatus(`Found ${response.count || 0} matches`, false); // Not an error
+                     updateStatus(`Found ${response.count || 0} matches`, response.count > 0 ? "success" : "info");
                      if (response.count > 0) {
                         setTimeout(() => {
                             chrome.tabs.sendMessage(activeTabId, { type: "RENDER_TICK_MARKS" }, r => {
@@ -728,11 +819,11 @@ document.addEventListener("DOMContentLoaded", () => {
                          });
                      }
                 } else {
-                     updateStatus(`Search failed: ${response.error || 'Unknown reason'}`, true);
+                     updateStatus(`Search failed: ${response.error || 'Unknown reason'}`, "error");
                 }
             } else {
                  // No response might also mean the content script isn't there
-                 updateStatus("Search failed: No response from page.", true);
+                 updateStatus("Search failed: No response from page.", "error");
                  contentScriptReady = false;
                  checkContentScript();
             }
@@ -745,21 +836,21 @@ document.addEventListener("DOMContentLoaded", () => {
         
         if (!contentScriptReady || !activeTabId) {
             console.warn("Cannot navigate: Extension not ready.");
-            updateStatus("Navigation failed: Not ready", true);
+            updateStatus("Navigation failed: Not ready", "error");
             return;
         }
         chrome.tabs.sendMessage(activeTabId, { type: "NAVIGATE", payload: { direction } }, (response) => {
             if (chrome.runtime.lastError) {
                 if (!chrome.runtime.lastError.message.includes("Receiving end does not exist")) {
                   console.error(`Navigation error (${direction}):`, chrome.runtime.lastError.message);
-                  updateStatus("Navigation failed", true);
+                  updateStatus("Navigation failed", "error");
                   if (chrome.runtime.lastError.message.includes("Could not establish connection")) {
                       contentScriptReady = false; checkContentScript();
                   }
                 }
             } else if (!response?.success) {
                 console.warn("Navigation command failed in content script.");
-                updateStatus("Navigation failed", true);
+                updateStatus("Navigation failed", "error");
             } else {
                  
                  // No status update needed, highlight change is feedback
@@ -787,18 +878,30 @@ document.addEventListener("DOMContentLoaded", () => {
         const regexExcludeInput = document.getElementById("regexExcludeTermInput");
         const prox1 = document.getElementById("proximityTerm1");
         const prox2 = document.getElementById("proximityTerm2");
-        if (searchInput) searchInput.value = "";
-        if (regexInput) regexInput.value = "";
+        if (searchInput) {
+            searchInput.value = "";
+            clearInputError(searchInput);
+        }
+        if (regexInput) {
+            regexInput.value = "";
+            clearInputError(regexInput);
+        }
         if (excludeInput) excludeInput.value = "";
         if (regexExcludeInput) regexExcludeInput.value = "";
-        if (prox1) prox1.value = "";
-        if (prox2) prox2.value = "";
+        if (prox1) {
+            prox1.value = "";
+            clearInputError(prox1);
+        }
+        if (prox2) {
+            prox2.value = "";
+            clearInputError(prox2);
+        }
   
         // 3. Clear Search History Storage and UI
         chrome.storage.sync.set({ searchHistory: [] }, () => {
             if (chrome.runtime.lastError) {
                 console.error("Error clearing search history storage:", chrome.runtime.lastError.message);
-                updateStatus("Error clearing history", true);
+                updateStatus("Error clearing history", "error");
             } else {
                 
                 renderSearchHistory(); // Update the UI list
@@ -808,47 +911,41 @@ document.addEventListener("DOMContentLoaded", () => {
   
         lastExplicitSearchTerm = ""; // Reset last searched term
         updateStatus(""); // Clear status message
-  
-        // Focus the currently visible input field
-        const isRegexMode = document.getElementById("regex-mode")?.checkVisibility();
-        if (isRegexMode && regexInput) {
-            regexInput.focus();
-        } else if (searchInput) {
-            searchInput.focus();
-        }
+
+        switchMode(currentMode, { focusInput: true });
     }
   
     // --- Export Highlights ---
     function handleExportHighlights() {
         
         if (!contentScriptReady || !activeTabId) {
-            updateStatus("Cannot export: Not ready.", true);
+            updateStatus("Cannot export: Not ready.", "error");
             return;
         }
-        updateStatus("Gathering highlights...");
+        updateStatus("Gathering highlights...", "loading");
   
         chrome.tabs.sendMessage(activeTabId, { type: "GET_HIGHLIGHTS_FOR_EXPORT" }, (response) => {
             if (chrome.runtime.lastError) {
                 if (!chrome.runtime.lastError.message.includes("Receiving end does not exist")) {
                   console.error("Export error:", chrome.runtime.lastError.message);
-                  updateStatus("Export failed: " + chrome.runtime.lastError.message, true);
+                  updateStatus("Export failed: " + chrome.runtime.lastError.message, "error");
                 }
             } else if (response && response.success) {
                  if (response.highlights && response.highlights.length > 0) {
                      if (window.advancedFindExporter && window.advancedFindExporter.exportHighlights) {
                         // Could add format selection later
                         window.advancedFindExporter.exportHighlights(response.highlights, response.pageUrl, response.pageTitle, 'csv'); // Default to CSV
-                        updateStatus(`Exported ${response.highlights.length} highlights.`);
+                        updateStatus(`Exported ${response.highlights.length} highlights.`, "success");
                      } else {
                          console.error("Export function not found!");
-                         updateStatus("Export failed: Export module error.", true);
+                         updateStatus("Export failed: Export module error.", "error");
                      }
                 } else {
-                    updateStatus("Nothing found to export.", false); // Not an error
+                    updateStatus("Nothing found to export.", "info");
                 }
             } else {
                 console.error("Export failed in content script:", response?.error);
-                updateStatus(`Export failed: ${response?.error || 'Unknown error'}`, true);
+                updateStatus(`Export failed: ${response?.error || 'Unknown error'}`, "error");
             }
         });
     }
@@ -951,14 +1048,15 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   
     function handleHistoryItemClick(term) {
-         
-         const isRegexMode = !document.getElementById("regex-mode")?.classList.contains("hidden");
-         const inputElement = document.getElementById(isRegexMode ? "regexSearchInput" : "searchTermInput");
-         const searchButton = document.getElementById(isRegexMode ? "regexSearchButton" : "searchButton");
+        const isRegexMode = currentMode === MODES.REGEX;
+        switchMode(isRegexMode ? MODES.REGEX : MODES.STANDARD, { focusInput: false });
+        const inputElement = document.getElementById(isRegexMode ? "regexSearchInput" : "searchTermInput");
+        const searchButton = document.getElementById(isRegexMode ? "regexSearchButton" : "searchButton");
   
-         if (inputElement) {
-             inputElement.value = term;
-             inputElement.focus();
+        if (inputElement) {
+            clearInputError(inputElement);
+            inputElement.value = term;
+            inputElement.focus();
              lastExplicitSearchTerm = term; // Set as last searched term explicitly
   
               // Trigger search immediately
@@ -977,14 +1075,8 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     // --- Workspace Search ---
-    function updateWorkspaceStatus(message = "", isError = false) {
-        const statusElement = document.getElementById("workspace-status");
-        if (!statusElement) return;
-        statusElement.textContent = message;
-        statusElement.classList.toggle('error', !!message && isError);
-        if (!message) {
-            statusElement.classList.remove('error');
-        }
+    function updateWorkspaceStatus(message = "", type = "info") {
+        setStatus("workspace-status", message, type);
     }
 
     function setWorkspaceBusy(isBusy) {
@@ -992,9 +1084,14 @@ document.addEventListener("DOMContentLoaded", () => {
         const searchButton = document.getElementById("workspaceSearchButton");
         const refreshButton = document.getElementById("workspaceRefreshButton");
         const input = document.getElementById("workspaceSearchInput");
+        const patternWorkspaceButton = document.getElementById("patternWorkspaceButton");
+        const workspaceSection = document.getElementById("workspace-section");
         if (searchButton) searchButton.disabled = isBusy;
         if (input) input.disabled = isBusy;
         if (refreshButton) refreshButton.disabled = isBusy || !workspaceState.lastQuery;
+        if (patternWorkspaceButton) patternWorkspaceButton.disabled = isBusy || !patternState.selectedPatternId;
+        if (workspaceSection) workspaceSection.classList.toggle("loading", isBusy);
+        syncPatternButtonStates();
     }
 
     function renderWorkspaceResults(tabResults = workspaceState.tabResults, historyResults = workspaceState.historyResults) {
@@ -1011,7 +1108,11 @@ document.addEventListener("DOMContentLoaded", () => {
         if (combined.length === 0) {
             const emptyState = document.createElement("div");
             emptyState.className = "workspace-result";
-            emptyState.textContent = workspaceState.lastQuery ? "No matches found. Adjust your terms and try again." : "Run a workspace scan to see results here.";
+            const lastQuery = workspaceState.lastQuery;
+            const emptyMessage = lastQuery?.patternInfo
+                ? `No matches found for pattern "${lastQuery.patternInfo.patternLabel}".`
+                : (lastQuery ? "No matches found. Adjust your terms and try again." : "Run a workspace scan to see results here.");
+            emptyState.textContent = emptyMessage;
             container.appendChild(emptyState);
         } else {
             combined
@@ -1022,6 +1123,311 @@ document.addEventListener("DOMContentLoaded", () => {
         if (refreshButton) {
             refreshButton.disabled = workspaceState.isScanning || !workspaceState.lastQuery;
         }
+    }
+
+    function updatePatternStatus(message = "", type = "info") {
+        setStatus("pattern-status", message, type);
+    }
+
+    function syncPatternButtonStates() {
+        const hasPattern = !!getSelectedPatternEntry();
+        const runButton = document.getElementById("patternRunButton");
+        const workspaceButton = document.getElementById("patternWorkspaceButton");
+        const applyButton = document.getElementById("patternApplyButton");
+        if (runButton) runButton.disabled = !hasPattern;
+        if (applyButton) applyButton.disabled = !hasPattern;
+        if (workspaceButton) workspaceButton.disabled = !hasPattern || workspaceState.isScanning;
+    }
+
+    function initializePatternLibrary() {
+        const categorySelect = document.getElementById("patternCategorySelect");
+        const patternSelect = document.getElementById("patternSelect");
+        if (!categorySelect || !patternSelect) return;
+
+        const categories = window.advancedFindPatternLibrary?.getCategories?.() || [];
+        patternState.categories = categories;
+
+        categorySelect.innerHTML = "";
+        patternSelect.innerHTML = "";
+
+        if (!categories.length) {
+            categorySelect.disabled = true;
+            patternSelect.disabled = true;
+            patternState.selectedCategoryId = null;
+            patternState.selectedPatternId = null;
+            updatePatternDetails();
+            updatePatternStatus("No patterns available.");
+            syncPatternButtonStates();
+            return;
+        }
+
+        categorySelect.disabled = false;
+        patternSelect.disabled = false;
+
+        categories.forEach(category => {
+            const option = document.createElement("option");
+            option.value = category.id;
+            option.textContent = category.label;
+            categorySelect.appendChild(option);
+        });
+
+        const initialCategory = categories.find(category => category.id === patternState.selectedCategoryId) || categories[0];
+        patternState.selectedCategoryId = initialCategory.id;
+        categorySelect.value = initialCategory.id;
+        populatePatternSelect(initialCategory.id);
+    }
+
+    function populatePatternSelect(categoryId) {
+        const patternSelect = document.getElementById("patternSelect");
+        if (!patternSelect) return;
+
+        const categoryEntry = window.advancedFindPatternLibrary?.getCategoryById?.(categoryId);
+        patternSelect.innerHTML = "";
+
+        if (!categoryEntry || !Array.isArray(categoryEntry.patterns) || !categoryEntry.patterns.length) {
+            patternState.selectedPatternId = null;
+            updatePatternDetails();
+            updatePatternStatus("No patterns defined for this category.");
+            syncPatternButtonStates();
+            return;
+        }
+
+        categoryEntry.patterns.forEach(pattern => {
+            const option = document.createElement("option");
+            option.value = pattern.id;
+            option.textContent = pattern.label;
+            patternSelect.appendChild(option);
+        });
+
+        const initialPattern = categoryEntry.patterns.find(pattern => pattern.id === patternState.selectedPatternId) || categoryEntry.patterns[0];
+        patternState.selectedPatternId = initialPattern.id;
+        patternSelect.value = initialPattern.id;
+        updatePatternDetails();
+        updatePatternStatus("", false);
+        syncPatternButtonStates();
+    }
+
+    function handlePatternCategoryChange(categoryId) {
+        patternState.selectedCategoryId = categoryId;
+        populatePatternSelect(categoryId);
+    }
+
+    function handlePatternSelectChange(patternId) {
+        patternState.selectedPatternId = patternId;
+        updatePatternDetails();
+        updatePatternStatus("", false);
+        syncPatternButtonStates();
+    }
+
+    function updatePatternDetails() {
+        const descriptionElement = document.getElementById("patternDescription");
+        const tagsElement = document.getElementById("patternTags");
+
+        const entry = getSelectedPatternEntry();
+        if (!entry) {
+            if (descriptionElement) descriptionElement.textContent = "Select a pattern to see details.";
+            if (tagsElement) tagsElement.innerHTML = "";
+            return;
+        }
+
+        if (descriptionElement) {
+            descriptionElement.textContent = entry.pattern.description || "No description provided.";
+        }
+
+        if (tagsElement) {
+            tagsElement.innerHTML = "";
+
+            const createTag = (label) => {
+                const tag = document.createElement("span");
+                tag.className = "pattern-tag";
+                tag.textContent = label;
+                tagsElement.appendChild(tag);
+            };
+
+            createTag(entry.category.label);
+            if (entry.pattern.options?.useRegex) createTag("Regex");
+            if (entry.pattern.options?.caseSensitive) createTag("Case sensitive");
+            if (entry.pattern.options?.wholeWords) createTag("Whole words");
+            if (entry.pattern.options?.ignoreDiacritics) createTag("Ignore diacritics");
+            (entry.pattern.tags || []).forEach(tag => createTag(tag));
+        }
+    }
+
+    function getSelectedPatternEntry() {
+        if (!patternState.selectedPatternId) return null;
+        return window.advancedFindPatternLibrary?.getPatternById?.(patternState.selectedPatternId) || null;
+    }
+
+    function normalizePatternOptions(pattern) {
+        const options = pattern?.options || {};
+        return {
+            caseSensitive: !!options.caseSensitive,
+            wholeWords: !!options.wholeWords,
+            ignoreDiacritics: !!options.ignoreDiacritics,
+            excludeTerm: options.excludeTerm || "",
+            useRegex: !!options.useRegex
+        };
+    }
+
+    function createPatternMetadata(pattern, category) {
+        if (!pattern) return null;
+        return {
+            patternId: pattern.id,
+            patternLabel: pattern.label,
+            categoryId: category?.id || null,
+            categoryLabel: category?.label || null,
+            description: pattern.description || "",
+            tags: Array.isArray(pattern.tags) ? pattern.tags : []
+        };
+    }
+
+    function runSelectedPatternOnActiveTab() {
+        const entry = getSelectedPatternEntry();
+        if (!entry) {
+            updatePatternStatus("Select a pattern before running.", "error");
+            return;
+        }
+        executePatternOnActiveTab(entry);
+    }
+
+    function executePatternOnActiveTab(entry) {
+        if (!contentScriptReady || !activeTabId) {
+            updatePatternStatus("Cannot run pattern: active tab not ready.", "error");
+            return;
+        }
+
+        const { category, pattern } = entry;
+        const options = normalizePatternOptions(pattern);
+        const metadata = createPatternMetadata(pattern, category);
+        options.patternMetadata = metadata;
+
+        updatePatternStatus(`Running "${pattern.label}" on this page...`, "loading");
+
+        chrome.tabs.sendMessage(activeTabId, {
+            type: "SEARCH_TEXT",
+            payload: {
+                searchTerms: Array.isArray(pattern.terms) ? pattern.terms : [pattern.terms],
+                options
+            }
+        }, (response) => {
+            if (chrome.runtime.lastError) {
+                const message = chrome.runtime.lastError.message;
+                if (!message.includes("Receiving end does not exist")) {
+                    console.error("Pattern search error:", message);
+                    updatePatternStatus("Pattern search failed: " + message, "error");
+                }
+                return;
+            }
+
+            if (response && response.success) {
+                const count = response.count || 0;
+                updatePatternStatus(`Found ${count} match${count === 1 ? "" : "es"} for "${pattern.label}".`, count > 0 ? "success" : "info");
+                if (count > 0) {
+                    setTimeout(() => {
+                        chrome.tabs.sendMessage(activeTabId, { type: "RENDER_TICK_MARKS" }, () => void chrome.runtime.lastError);
+                    }, 150);
+                } else {
+                    chrome.tabs.sendMessage(activeTabId, { type: "CLEAR_TICK_MARKS" }, () => void chrome.runtime.lastError);
+                }
+            } else {
+                updatePatternStatus(response?.error ? `Pattern search failed: ${response.error}` : "Pattern search failed.", "error");
+            }
+        });
+    }
+
+    function runSelectedPatternWorkspaceScan() {
+        const entry = getSelectedPatternEntry();
+        if (!entry) {
+            updatePatternStatus("Select a pattern before scanning workspace.", "error");
+            return;
+        }
+        const query = createWorkspaceQueryFromPattern(entry);
+        if (!query) {
+            updatePatternStatus("Unable to build workspace query for pattern.", "error");
+            return;
+        }
+        updatePatternStatus(`Scanning workspace for pattern "${entry.pattern.label}"...`, "loading");
+        runWorkspaceSearch({ explicitQuery: query });
+    }
+
+    function createWorkspaceQueryFromPattern(entry) {
+        const { category, pattern } = entry;
+        const options = normalizePatternOptions(pattern);
+        const metadata = createPatternMetadata(pattern, category);
+        options.patternMetadata = metadata;
+
+        const includeHistory = document.getElementById("workspaceIncludeHistory")?.checked || false;
+        const includeAllWindows = document.getElementById("workspaceAllWindows")?.checked || false;
+        const termsArray = Array.isArray(pattern.terms) ? pattern.terms : [pattern.terms];
+
+        return {
+            termString: termsArray.join(", "),
+            terms: termsArray,
+            options,
+            includeHistory,
+            includeAllWindows,
+            patternInfo: metadata
+        };
+    }
+
+    function loadPatternIntoSearch() {
+        const entry = getSelectedPatternEntry();
+        if (!entry) {
+            updatePatternStatus("Select a pattern to load into search.", "error");
+            return;
+        }
+
+        const { pattern } = entry;
+        const options = normalizePatternOptions(pattern);
+        const termsArray = Array.isArray(pattern.terms) ? pattern.terms : [pattern.terms];
+
+        if (pattern.options?.useRegex && termsArray.length === 1) {
+            switchMode(MODES.REGEX, { focusInput: false });
+            const regexInput = document.getElementById("regexSearchInput");
+            if (regexInput) {
+                clearInputError(regexInput);
+                regexInput.value = termsArray[0];
+                regexInput.focus();
+            }
+        } else {
+            switchMode(MODES.STANDARD, { focusInput: false });
+            const searchInput = document.getElementById("searchTermInput");
+            if (searchInput) {
+                clearInputError(searchInput);
+                searchInput.value = termsArray.join(", ");
+                searchInput.focus();
+            }
+        }
+
+        const workspaceInput = document.getElementById("workspaceSearchInput");
+        if (workspaceInput) {
+            workspaceInput.value = termsArray.join(", ");
+        }
+
+        const caseCheckbox = document.getElementById("caseSensitiveCheckbox");
+        if (caseCheckbox) {
+            caseCheckbox.checked = !!options.caseSensitive;
+            handleToggleChange({ target: caseCheckbox });
+        }
+
+        const wholeWordsCheckbox = document.getElementById("wholeWordsCheckbox");
+        if (wholeWordsCheckbox) {
+            wholeWordsCheckbox.checked = !!options.wholeWords;
+            handleToggleChange({ target: wholeWordsCheckbox });
+        }
+
+        const ignoreDiacriticsCheckbox = document.getElementById("ignoreDiacriticsCheckbox");
+        if (ignoreDiacriticsCheckbox) {
+            ignoreDiacriticsCheckbox.checked = !!options.ignoreDiacritics;
+            handleToggleChange({ target: ignoreDiacriticsCheckbox });
+        }
+
+        const excludeInput = document.getElementById("excludeTermInput");
+        if (excludeInput) {
+            excludeInput.value = options.excludeTerm || "";
+        }
+
+        updatePatternStatus("Pattern loaded into search controls.", "success");
     }
 
     function buildWorkspaceQuery(termString) {
@@ -1043,32 +1449,41 @@ document.addEventListener("DOMContentLoaded", () => {
             terms: rawTerms,
             options: { caseSensitive, wholeWords, ignoreDiacritics, excludeTerm, useRegex },
             includeHistory,
-            includeAllWindows
+            includeAllWindows,
+            patternInfo: null
         };
     }
 
-    async function runWorkspaceSearch({ reuseLast = false } = {}) {
+    async function runWorkspaceSearch({ reuseLast = false, explicitQuery = null } = {}) {
         if (workspaceState.isScanning) return;
 
         const inputElement = document.getElementById("workspaceSearchInput");
         if (!inputElement) return;
 
-        let termString = reuseLast && workspaceState.lastQuery ? workspaceState.lastQuery.termString : inputElement.value.trim();
-        if (!termString && workspaceState.lastQuery) {
-            termString = workspaceState.lastQuery.termString;
-        }
+        let query = explicitQuery;
 
-        const query = buildWorkspaceQuery(termString || "");
+        clearInputError(inputElement);
+
         if (!query) {
-            updateWorkspaceStatus("Enter at least one search term.", true);
-            return;
+            let termString = reuseLast && workspaceState.lastQuery ? workspaceState.lastQuery.termString : inputElement.value.trim();
+            if (!termString && workspaceState.lastQuery) {
+                termString = workspaceState.lastQuery.termString;
+            }
+
+            query = buildWorkspaceQuery(termString || "");
+            if (!query) {
+                inputElement.classList.add("input-error");
+                inputElement.setAttribute("aria-invalid", "true");
+                updateWorkspaceStatus("Enter at least one search term.", "error");
+                return;
+            }
         }
 
         workspaceState.lastQuery = query;
         inputElement.value = query.termString;
 
         setWorkspaceBusy(true);
-        updateWorkspaceStatus("Scanning workspace...");
+        updateWorkspaceStatus("Scanning workspace...", "loading");
 
         try {
             const tabResults = await scanTabsForMatches(query);
@@ -1083,14 +1498,24 @@ document.addEventListener("DOMContentLoaded", () => {
             const historyTotal = historyResults.reduce((sum, item) => sum + (item.totalMatches || 0), 0);
             const aggregate = tabTotal + historyTotal;
 
+            const patternLabel = query.patternInfo?.patternLabel;
             if (aggregate > 0) {
-                updateWorkspaceStatus(`Found ${aggregate} matches across workspace.`);
+                updateWorkspaceStatus(patternLabel ? `Found ${aggregate} matches for pattern "${patternLabel}" across workspace.` : `Found ${aggregate} matches across workspace.`, "success");
+                if (patternLabel) {
+                    updatePatternStatus(`Workspace scan complete: ${aggregate} matches for "${patternLabel}".`, "success");
+                }
             } else {
-                updateWorkspaceStatus("No matches found across workspace.");
+                updateWorkspaceStatus(patternLabel ? `No matches found for pattern "${patternLabel}" across workspace.` : "No matches found across workspace.", "info");
+                if (patternLabel) {
+                    updatePatternStatus(`No matches found for "${patternLabel}" across workspace.`, "info");
+                }
             }
         } catch (error) {
             console.error("Workspace scan failed:", error);
-            updateWorkspaceStatus(`Workspace scan failed: ${error.message || error}`, true);
+            updateWorkspaceStatus(`Workspace scan failed: ${error.message || error}`, "error");
+            if (query.patternInfo?.patternLabel) {
+                updatePatternStatus(`Workspace scan failed for "${query.patternInfo.patternLabel}": ${error.message || error}`, "error");
+            }
         } finally {
             setWorkspaceBusy(false);
         }
@@ -1129,6 +1554,20 @@ document.addEventListener("DOMContentLoaded", () => {
         header.appendChild(titleContainer);
         header.appendChild(totalBadge);
         card.appendChild(header);
+
+        if (result.patternInfo?.patternLabel) {
+            const patternMeta = document.createElement("div");
+            patternMeta.className = "workspace-result-meta";
+            patternMeta.textContent = `Pattern: ${result.patternInfo.patternLabel}`;
+            card.appendChild(patternMeta);
+
+            if (Array.isArray(result.patternInfo.tags) && result.patternInfo.tags.length) {
+                const tagsRow = document.createElement("div");
+                tagsRow.className = "workspace-result-meta";
+                tagsRow.textContent = `Tags: ${result.patternInfo.tags.join(", ")}`;
+                card.appendChild(tagsRow);
+            }
+        }
 
         if (Array.isArray(result.perTerm) && result.perTerm.length) {
             const termBreakdown = document.createElement("div");
@@ -1206,16 +1645,17 @@ document.addEventListener("DOMContentLoaded", () => {
                         wholeWords: query.options.wholeWords,
                         ignoreDiacritics: query.options.ignoreDiacritics,
                         excludeTerm: query.options.excludeTerm,
-                        useRegex: query.options.useRegex
+                        useRegex: query.options.useRegex,
+                        patternMetadata: query.options.patternMetadata || null
                     }
                 };
 
-                Promise.all(eligibleTabs.map(tab => countMatchesInTab(tab, payload))).then(resolve);
+                Promise.all(eligibleTabs.map(tab => countMatchesInTab(tab, payload, query.patternInfo || null))).then(resolve);
             });
         });
     }
 
-    function countMatchesInTab(tab, payload) {
+    function countMatchesInTab(tab, payload, patternInfo) {
         return new Promise((resolve) => {
             chrome.tabs.sendMessage(tab.id, { type: "COUNT_MATCHES", payload }, (response) => {
                 const baseResult = {
@@ -1226,7 +1666,8 @@ document.addEventListener("DOMContentLoaded", () => {
                     url: tab.url,
                     favIconUrl: tab.favIconUrl,
                     totalMatches: 0,
-                    perTerm: payload.searchTerms.map(term => ({ term, count: 0 }))
+                    perTerm: payload.searchTerms.map(term => ({ term, count: 0 })),
+                    patternInfo: patternInfo || null
                 };
 
                 if (chrome.runtime.lastError) {
@@ -1332,7 +1773,8 @@ document.addEventListener("DOMContentLoaded", () => {
                     url: entry.url,
                     lastVisitTime: entry.lastVisitTime,
                     totalMatches: counts.total,
-                    perTerm: counts.perTerm
+                    perTerm: counts.perTerm,
+                    patternInfo: query.patternInfo || null
                 };
             })
             .catch(error => ({
@@ -1342,6 +1784,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 lastVisitTime: entry.lastVisitTime,
                 totalMatches: 0,
                 perTerm: query.terms.map(term => ({ term, count: 0 })),
+                patternInfo: query.patternInfo || null,
                 error: error.message || String(error)
             }));
     }
@@ -1366,7 +1809,7 @@ document.addEventListener("DOMContentLoaded", () => {
     function highlightWorkspaceTab(result) {
         if (!result || typeof result.tabId !== "number") return;
         if (!workspaceState.lastQuery) {
-            updateWorkspaceStatus("Run a workspace scan before highlighting.", true);
+        updateWorkspaceStatus("Run a workspace scan before highlighting.", "error");
             return;
         }
 
@@ -1392,14 +1835,14 @@ document.addEventListener("DOMContentLoaded", () => {
                 const message = chrome.runtime.lastError.message;
                 if (!message.includes("Receiving end does not exist")) {
                     console.error("Failed to highlight workspace tab:", message);
-                    updateWorkspaceStatus("Could not highlight tab (content script not available).", true);
+                    updateWorkspaceStatus("Could not highlight tab (content script not available).", "error");
                 }
                 return;
             }
             if (response && response.success) {
-                updateWorkspaceStatus(`Highlighted ${response.count || 0} matches in the selected tab.`);
+                updateWorkspaceStatus(`Highlighted ${response.count || 0} matches in the selected tab.`, "success");
             } else {
-                updateWorkspaceStatus("Highlight request failed in the selected tab.", true);
+                updateWorkspaceStatus("Highlight request failed in the selected tab.", "error");
             }
         });
     }
@@ -1408,56 +1851,15 @@ document.addEventListener("DOMContentLoaded", () => {
         if (!result?.url) return;
         chrome.tabs.create({ url: result.url }, (tab) => {
             if (chrome.runtime.lastError) {
-                updateWorkspaceStatus("Unable to open history entry.", true);
+                updateWorkspaceStatus("Unable to open history entry.", "error");
                 console.error("Failed to open history result:", chrome.runtime.lastError.message);
             } else {
-                updateWorkspaceStatus("Opened history entry in a new tab.");
+                updateWorkspaceStatus("Opened history entry in a new tab.", "success");
             }
         });
     }
 
     // --- Mode Switching ---
-    function switchToRegexMode() {
-        
-        document.getElementById("standard-mode")?.classList.add("hidden");
-        document.getElementById("regex-mode")?.classList.remove("hidden");
-        document.getElementById("proximity-controls")?.classList.add("hidden"); // Hide proximity
-        const proxCheckbox = document.getElementById("proximitySearchCheckbox");
-        if(proxCheckbox) proxCheckbox.checked = false; // Uncheck proximity
-  
-        updateStatus("Regex mode active.");
-        lastExplicitSearchTerm = ""; // Reset last term
-        document.getElementById("regexSearchInput")?.focus();
-        document.getElementById("searchTermInput").value = ''; // Clear standard input
-        document.getElementById("proximityTerm1").value = ''; // Clear prox inputs
-        document.getElementById("proximityTerm2").value = '';
-    }
-  
-    function returnToStandardMode() {
-        
-        document.getElementById("regex-mode")?.classList.add("hidden");
-        document.getElementById("standard-mode")?.classList.remove("hidden");
-        // Restore proximity visibility based on its own checkbox state
-        setupProximitySearchUI();
-  
-        updateStatus(""); // Clear status
-        lastExplicitSearchTerm = ""; // Reset last term
-        document.getElementById("searchTermInput")?.focus();
-        document.getElementById("regexSearchInput").value = ''; // Clear regex input
-    }
-  
-     // --- Specific UI Setup ---
-     function setupProximitySearchUI() {
-        const proximitySearchCheckbox = document.getElementById("proximitySearchCheckbox");
-        const proximitySearchContainer = document.getElementById("proximity-controls");
-        if (!proximitySearchCheckbox || !proximitySearchContainer) {
-             console.error("Cannot setup proximity UI - elements missing."); return;
-         }
-        // Set initial visibility based on checkbox state (might have been changed by mode switch)
-        proximitySearchContainer.classList.toggle("hidden", !proximitySearchCheckbox.checked);
-        // The main listener is added in setupEventListeners to avoid duplicates
-     }
-  
      function setupRegexMode() { // Sets up predefined options listeners
          
          const regexOptions = document.getElementsByName("regexOption");

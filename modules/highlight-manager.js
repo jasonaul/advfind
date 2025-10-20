@@ -192,6 +192,15 @@
                                              // Optional: Do something with each marked element if needed
                                              // Add term info for export?
                                              element.dataset.searchTerm = term; // Store which term matched
+                                             if (options.patternMetadata) {
+                                                 element.dataset.patternId = options.patternMetadata.patternId || "";
+                                                 element.dataset.patternLabel = options.patternMetadata.patternLabel || "";
+                                                 element.dataset.patternCategoryId = options.patternMetadata.categoryId || "";
+                                                 element.dataset.patternCategoryLabel = options.patternMetadata.categoryLabel || "";
+                                                 if (Array.isArray(options.patternMetadata.tags)) {
+                                                     element.dataset.patternTags = options.patternMetadata.tags.join(",");
+                                                 }
+                                             }
                                          },
                                          done: (count) => {
                                              
@@ -315,54 +324,79 @@
                             this.currentIndex = -1;
 
                              // --- Create Proximity Regex ---
-                             // Escape terms properly, considering wholeWords
+                             const distanceType = options.distanceType === 'chars' ? 'chars' : 'words';
+                             const requireOrder = !!options.requireOrder;
+                             const sameParagraph = !!options.sameParagraph;
+                             const patternMetadata = options.patternMetadata || null;
+
                             function escapeRegex(str) {
                                 return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
                             }
+
                             let escapedTerm1 = options.wholeWords ? `\\b${escapeRegex(term1)}\\b` : escapeRegex(term1);
                             let escapedTerm2 = options.wholeWords ? `\\b${escapeRegex(term2)}\\b` : escapeRegex(term2);
 
-                             // Regex for intervening words (non-greedy to avoid overmatching)
-                             // Match word characters (\w) separated by non-word characters (\W)
-                             // (?: ... ) is a non-capturing group
-                             // \W+ matches one or more non-word characters (spaces, punctuation)
-                             // \w+ matches one or more word characters
-                             // {0,maxDistance} allows 0 up to maxDistance intervening words
-                             // \W* matches optional whitespace/punctuation at the end
-                            let intervening = `(?:\\W+\\w+){0,${maxDistance}}?\\W*?`; // Added non-greedy '?'
+                            let intervening;
+                            if (distanceType === 'chars') {
+                                const safeDistance = Math.max(0, maxDistance);
+                                intervening = `[\\s\\S]{0,${safeDistance}}?`;
+                            } else {
+                                intervening = `(?:\\W+\\w+){0,${maxDistance}}?\\W*?`;
+                            }
 
-                             // Build patterns for both orders
-                            let pattern1 = `(${escapedTerm1}${intervening}${escapedTerm2})`; // Capture the whole match
-                            let pattern2 = `(${escapedTerm2}${intervening}${escapedTerm1})`; // Capture the whole match
+                            const patternParts = [];
+                            patternParts.push(`(${escapedTerm1}${intervening}${escapedTerm2})`);
+                            if (!requireOrder) {
+                                patternParts.push(`(${escapedTerm2}${intervening}${escapedTerm1})`);
+                            }
 
-                            let combinedPattern = `${pattern1}|${pattern2}`;
-                            let flags = options.caseSensitive ? "g" : "gi";
+                            const combinedPattern = patternParts.join('|');
+                            const flags = options.caseSensitive ? "g" : "gi";
+                            const elementsForValidation = sameParagraph ? [] : null;
 
                             try {
-                                let combinedRegex = new RegExp(combinedPattern, flags);
-                                
+                                const combinedRegex = new RegExp(combinedPattern, flags);
 
-                                 // --- Exclusion Filter ---
-                                 const filterCallback = this.createExclusionFilter(options.excludeTerm, options.caseSensitive);
+                                const filterCallback = this.createExclusionFilter(options.excludeTerm, options.caseSensitive);
 
-                                 // Use mark.js with the combined regex
                                 this.markInstance.markRegExp(combinedRegex, {
-                                    className: `${highlightConfig.baseClass} ${highlightConfig.proximityHighlightClass}`, // Specific class for proximity
+                                    className: `${highlightConfig.baseClass} ${highlightConfig.proximityHighlightClass}`,
                                     acrossElements: true,
-                                    separateWordSearch: false, // Treat the whole match as one
+                                    separateWordSearch: false,
                                     diacritics: !!options.ignoreDiacritics,
-                                    caseSensitive: options.caseSensitive || false, 
-                                    filter: filterCallback, // Apply exclusion
+                                    caseSensitive: options.caseSensitive || false,
+                                    filter: filterCallback,
                                     each: (element) => {
-                                        // Store terms for export/info
                                         element.dataset.searchTerm = `${term1} ~ ${term2}`;
                                         element.dataset.isProximity = "true";
+                                        if (patternMetadata) {
+                                            element.dataset.patternId = patternMetadata.patternId || "";
+                                            element.dataset.patternLabel = patternMetadata.patternLabel || "";
+                                            element.dataset.patternCategoryId = patternMetadata.categoryId || "";
+                                            element.dataset.patternCategoryLabel = patternMetadata.categoryLabel || "";
+                                            if (Array.isArray(patternMetadata.tags)) {
+                                                element.dataset.patternTags = patternMetadata.tags.join(",");
+                                            }
+                                        }
+                                        if (elementsForValidation) {
+                                            elementsForValidation.push(element);
+                                        }
                                     },
                                     done: (count) => {
-                                        
+                                        let validCount = count;
+
+                                        if (elementsForValidation && elementsForValidation.length) {
+                                            elementsForValidation.forEach((element) => {
+                                                if (!this.isMatchInSameParagraph(element, term1, term2, options)) {
+                                                    this.unwrapHighlightElement(element);
+                                                    validCount = Math.max(0, validCount - 1);
+                                                }
+                                            });
+                                        }
+
                                          this.updateHighlightListAndNavigation();
                                          this.startObserver(); // Restart observer
-                                         if (callback) callback(count);
+                                         if (callback) callback(validCount);
                                          // Save state
                                         window.advancedFindPersistence?.saveState(this.currentSearchTerms, this.currentSearchOptions);
                                     }
@@ -471,9 +505,9 @@
              }
         }
 
-         /**
-          * Gathers details of all current highlights for export.
-          * @returns {Array<object>} Array of { text: string, term: string, context: string, isProximity: boolean }
+        /**
+         * Gathers details of all current highlights for export.
+         * @returns {Array<object>} Array of { text: string, term: string, context: string, isProximity: boolean }
           */
          getHighlightsForExport() {
             const exportData = [];
@@ -509,15 +543,66 @@
                  const context = `${contextBefore.trim()} **${text}** ${contextAfter.trim()}`;
 
 
-                 exportData.push({
-                     text: text,
-                     term: term,
-                     context: context.replace(/\s+/g, ' ').trim(), // Clean up whitespace
-                     isProximity: isProximity
-                 });
-             });
-             return exportData;
-         }
+                exportData.push({
+                    text: text,
+                    term: term,
+                    context: context.replace(/\s+/g, ' ').trim(), // Clean up whitespace
+                    isProximity: isProximity,
+                    patternId: el.dataset.patternId || "",
+                    patternLabel: el.dataset.patternLabel || "",
+                    patternCategoryId: el.dataset.patternCategoryId || "",
+                    patternCategoryLabel: el.dataset.patternCategoryLabel || "",
+                    patternTags: el.dataset.patternTags ? el.dataset.patternTags.split(',') : []
+                });
+            });
+            return exportData;
+        }
+
+        getParagraphContainer(element) {
+            if (!element || element.nodeType !== Node.ELEMENT_NODE) return null;
+            return element.closest('p, li, blockquote, dt, dd, address, td, th');
+        }
+
+        isMatchInSameParagraph(element, term1, term2, options) {
+            const container = this.getParagraphContainer(element);
+            if (!container) return false;
+            const text = container.innerText || container.textContent || '';
+            if (!text) return false;
+
+            try {
+                const regex1 = window.advancedFindSearchUtils.createSearchRegex(
+                    term1,
+                    options.caseSensitive,
+                    options.wholeWords,
+                    options.useRegex,
+                    options.ignoreDiacritics
+                );
+                const regex2 = window.advancedFindSearchUtils.createSearchRegex(
+                    term2,
+                    options.caseSensitive,
+                    options.wholeWords,
+                    options.useRegex,
+                    options.ignoreDiacritics
+                );
+
+                regex1.lastIndex = 0;
+                if (!regex1.test(text)) return false;
+                regex2.lastIndex = 0;
+                return regex2.test(text);
+            } catch (error) {
+                console.warn('Paragraph validation failed:', error);
+                return false;
+            }
+        }
+
+        unwrapHighlightElement(element) {
+            if (!element || !element.parentNode) return;
+            const parent = element.parentNode;
+            while (element.firstChild) {
+                parent.insertBefore(element.firstChild, element);
+            }
+            parent.removeChild(element);
+        }
 
 
     } // End of HighlightManager class

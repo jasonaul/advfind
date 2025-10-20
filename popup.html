@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="popup.css">
   <!-- Load modules before popup.js -->
   <script src="modules/config.js"></script> <!-- Config needed early -->
+  <script src="modules/pattern-library.js"></script>
   <script src="modules/export-highlights.js"></script>
   <script src="modules/live-search.js"></script>
   <script src="modules/search-utils.js"></script>
@@ -29,8 +30,14 @@
       </button>
     </div>
 
+    <div class="mode-toggle" role="tablist" aria-label="Search mode">
+      <button class="mode-button active" id="mode-tab-standard" data-mode="standard" role="tab" aria-selected="true" aria-controls="standard-mode">Standard</button>
+      <button class="mode-button" id="mode-tab-regex" data-mode="regex" role="tab" aria-selected="false" aria-controls="regex-mode">Regex</button>
+      <button class="mode-button" id="mode-tab-proximity" data-mode="proximity" role="tab" aria-selected="false" aria-controls="proximity-mode">Proximity</button>
+    </div>
+
     <!-- Global Options Toggles -->
-    <div class="global-options toggles-grid"> <!-- Use grid for better alignment -->
+    <div class="global-options toggles-grid" aria-label="Search options">
       <label class="checkbox-label" title="Match exact case">
           <input type="checkbox" id="caseSensitiveCheckbox" />
           Case Sensitive
@@ -43,18 +50,10 @@
            <input type="checkbox" id="ignoreDiacriticsCheckbox"/>
            Ignore Diacritics
       </label>
-      <label class="checkbox-label" title="Switch to Regular Expression input mode">
-        <input type="checkbox" id="regexCheckbox" />
-        Regex Mode
-      </label>
-       <label class="checkbox-label" title="Search for two terms near each other">
-        <input type="checkbox" id="proximitySearchCheckbox" />
-        Proximity Search
-      </label>
     </div>
 
     <!-- Standard Mode -->
-    <div id="standard-mode">
+    <div id="standard-mode" class="mode-panel" role="tabpanel" aria-labelledby="mode-tab-standard" aria-hidden="false">
       <div class="input-action-group">
         <input type="text" id="searchTermInput" placeholder="Enter term(s), use * for wildcard" aria-label="Search term" />
         <div class="search-container exclude-container">
@@ -70,30 +69,11 @@
         <button id="exportButton" class="secondary-button">Export</button>
       </div>
 
-      <!-- Proximity Controls -->
-      <div id="proximity-controls" class="hidden section-box">
-        <div class="input-group">
-            <label for="proximityTerm1">First Term</label>
-            <input type="text" id="proximityTerm1" placeholder="Enter first term" />
-        </div>
-        <div class="input-group">
-            <label for="proximityTerm2">Second Term</label>
-            <input type="text" id="proximityTerm2" placeholder="Enter second term" />
-        </div>
-        <div class="input-group proximity-value-group">
-            <label for="proximityValue">Max Words Between</label>
-            <input type="number" id="proximityValue" min="1" max="50" value="10" />
-        </div>
-        <button id="searchProximityButton" class="primary-button full-width">Search Proximity</button>
-      </div>
-
       <div id="status" class="status-message" aria-live="polite"></div>
     </div>
 
     <!-- Regex Mode -->
-    <div id="regex-mode" class="hidden">
-      <button id="returnStandardMode" class="secondary-button return-button">← Return to Standard Mode</button>
-
+    <div id="regex-mode" class="mode-panel hidden" role="tabpanel" aria-labelledby="mode-tab-regex" aria-hidden="true">
       <div class="input-action-group">
         <div class="input-with-help">
             <input type="text" id="regexSearchInput" placeholder="Enter regex pattern..." aria-label="Regex search pattern"/>
@@ -122,6 +102,41 @@
       </div>
 
       <div id="regex-status" class="status-message" aria-live="polite"></div> <!-- Separate status for regex -->
+    </div>
+
+    <!-- Proximity Mode -->
+    <div id="proximity-mode" class="mode-panel hidden" role="tabpanel" aria-labelledby="mode-tab-proximity" aria-hidden="true">
+      <div class="input-group">
+          <label for="proximityTerm1">First Term</label>
+          <input type="text" id="proximityTerm1" placeholder="Enter first term" />
+      </div>
+      <div class="input-group">
+          <label for="proximityTerm2">Second Term</label>
+          <input type="text" id="proximityTerm2" placeholder="Enter second term" />
+      </div>
+      <div class="input-group proximity-value-group">
+          <label for="proximityValue">Max Distance</label>
+          <input type="number" id="proximityValue" min="1" max="200" value="10" />
+      </div>
+      <div class="input-group proximity-distance-type">
+          <label for="proximityDistanceType">Measure</label>
+          <select id="proximityDistanceType">
+              <option value="words" selected>Words</option>
+              <option value="chars">Characters</option>
+          </select>
+      </div>
+      <div class="proximity-advanced toggles-grid" role="group" aria-label="Proximity options">
+          <label class="checkbox-label standalone" title="Require the first term to appear before the second">
+              <input type="checkbox" id="proximityOrderCheckbox" />
+              Term 1 must precede Term 2
+          </label>
+          <label class="checkbox-label standalone" title="Only match when both terms are inside the same paragraph element">
+              <input type="checkbox" id="proximitySameParagraphCheckbox" />
+              Restrict to same paragraph
+          </label>
+      </div>
+      <button id="searchProximityButton" class="primary-button full-width">Search Proximity</button>
+      <div id="proximity-status" class="status-message" aria-live="polite"></div>
     </div>
 
 
@@ -164,6 +179,27 @@
       <div id="workspace-results" role="list">
         <!-- Results rendered dynamically -->
       </div>
+    </div>
+
+    <!-- Pattern Library -->
+    <div id="pattern-library-section" class="section-box">
+      <div class="pattern-header">
+        <h3 class="section-title">Pattern Library</h3>
+      </div>
+      <div class="pattern-controls">
+        <select id="patternCategorySelect" aria-label="Pattern category"></select>
+        <select id="patternSelect" aria-label="Pattern selection"></select>
+        <button id="patternRunButton" class="secondary-button">Run Pattern</button>
+      </div>
+      <div id="pattern-details" class="pattern-details">
+        <div id="patternDescription" class="pattern-description">Select a pattern to see details.</div>
+        <div id="patternTags" class="pattern-tags" aria-live="polite"></div>
+      </div>
+      <div class="pattern-actions">
+        <button id="patternWorkspaceButton" class="secondary-button compact" title="Scan workspace using this pattern">Scan Workspace</button>
+        <button id="patternApplyButton" class="secondary-button compact" title="Apply pattern terms to search input">Load into Search</button>
+      </div>
+      <div id="pattern-status" class="status-message" aria-live="polite"></div>
     </div>
 
     <!-- Settings Panel (Modal Style) -->

@@ -74,10 +74,12 @@
         }
 
          // Prevent live search if certain modes are active
-         if (document.getElementById("regexCheckbox")?.checked || document.getElementById("proximitySearchCheckbox")?.checked) {
-             clearHighlights(); // Clear standard highlights if switching to other modes
-             return;
-         }
+        const activeModeButton = document.querySelector('.mode-button.active');
+        const activeMode = activeModeButton?.dataset.mode || 'standard';
+        if (activeMode !== 'standard') {
+            clearHighlights();
+            return;
+        }
           // Check again for comma, just in case
          if (searchTerm.includes(',')) {
              return;
@@ -152,9 +154,11 @@
     function clearHighlights() {
         if (!contentScriptReady || !activeTabId) return;
         // Only clear if live search should be active (not regex/proximity)
-         if (document.getElementById("regexCheckbox")?.checked || document.getElementById("proximitySearchCheckbox")?.checked) {
-             return;
-         }
+        const activeModeButton = document.querySelector('.mode-button.active');
+        const activeMode = activeModeButton?.dataset.mode || 'standard';
+        if (activeMode !== 'standard') {
+            return;
+        }
 
         chrome.tabs.sendMessage(activeTabId, { type: "CLEAR_HIGHLIGHTS" }, (response) => {
              if (chrome.runtime.lastError && !chrome.runtime.lastError.message.includes("Receiving end does not exist")) {
@@ -171,6 +175,15 @@
     }
 
     function updateStatus(message) {
+        if (typeof window.updateStatus === 'function') {
+            if (!message) {
+                window.updateStatus("");
+            } else {
+                window.updateStatus(message, 'info');
+            }
+            return;
+        }
+
         const statusElement = document.getElementById("status");
         if (statusElement) {
             statusElement.textContent = message;

@@ -40,10 +40,76 @@
         behavior: {
              // How many words of context to check for exclusions (adjust as needed)
              excludeTermContextWords: 3,
+        },
+        library: {
+            categories: [
+                {
+                    id: "legal",
+                    label: "Legal Clauses",
+                    description: "Common contractual phrases that often require review.",
+                    patterns: [
+                        {
+                            id: "force_majeure",
+                            label: "Force majeure clause",
+                            description: "Detects references to force majeure obligations or events.",
+                            terms: ["force majeure"],
+                            options: { caseSensitive: false, wholeWords: false, useRegex: false },
+                            tags: ["risk", "obligation"]
+                        },
+                        {
+                            id: "notwithstanding",
+                            label: "\"Notwithstanding the foregoing\"",
+                            description: "Highlights sweeping carve-outs that may override prior language.",
+                            terms: ["notwithstanding the foregoing"],
+                            options: { caseSensitive: false, wholeWords: false, useRegex: false },
+                            tags: ["carve-out"]
+                        },
+                        {
+                            id: "without_limitation",
+                            label: "\"Without limitation\" language",
+                            description: "Finds broad qualifiers that may expand scope unexpectedly.",
+                            terms: ["without limitation", "without limiting the generality"],
+                            options: { caseSensitive: false, wholeWords: false, useRegex: false },
+                            tags: ["scope"]
+                        }
+                    ]
+                },
+                {
+                    id: "code",
+                    label: "Code Smells",
+                    description: "Patterns that often indicate debugging or risky code paths.",
+                    patterns: [
+                        {
+                            id: "todo_fixme",
+                            label: "TODO / FIXME markers",
+                            description: "Surfaces TODO or FIXME comments left in code.",
+                            terms: ["TODO", "FIXME"],
+                            options: { caseSensitive: false, wholeWords: false, useRegex: false },
+                            tags: ["maintenance", "debt"]
+                        },
+                        {
+                            id: "console_log",
+                            label: "Console logging",
+                            description: "Finds console.log statements that may need removal before release.",
+                            terms: ["\\bconsole\\.log\\s*\\("],
+                            options: { caseSensitive: false, wholeWords: false, useRegex: true },
+                            tags: ["debug"]
+                        },
+                        {
+                            id: "eval_usage",
+                            label: "eval usage",
+                            description: "Flags eval calls which can create security concerns.",
+                            terms: ["\\beval\\s*\\("],
+                            options: { caseSensitive: false, wholeWords: false, useRegex: true },
+                            tags: ["security", "risk"]
+                        }
+                    ]
+                }
+            ]
         }
     };
 
-    const tickMarkColor = "rgba(255, 0, 0, 0.5)"; // Keep tick mark color simple for now
+    const tickMarkColor = config.settings.defaultHighlightColor;
 
     // Function to update config based on stored settings (called from content/popup)
     function updateConfigFromStorage(settings) {
@@ -72,6 +138,10 @@
 
 
         console.log("Config updated from storage:", config);
+
+        if (window.advancedFindConfig) {
+            window.advancedFindConfig.tickMarkColor = config.settings.defaultHighlightColor;
+        }
     }
 
 

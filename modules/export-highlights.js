@@ -22,6 +22,14 @@
              if (h.isProximity) {
                  output += `Type: Proximity Match\n`;
              }
+             if (h.patternLabel) {
+                 const categoryInfo = h.patternCategoryLabel ? ` (Category: ${h.patternCategoryLabel})` : '';
+                 output += `Pattern: ${h.patternLabel}${categoryInfo}\n`;
+             }
+             const tags = Array.isArray(h.patternTags) ? h.patternTags : (typeof h.patternTags === 'string' && h.patternTags ? h.patternTags.split(',') : []);
+             if (tags.length) {
+                 output += `Tags: ${tags.join(', ')}\n`;
+             }
             output += "\n";
         });
 
@@ -50,17 +58,21 @@
          };
 
         // Define headers
-        const headers = ["Index", "Term", "Highlighted Text", "Context", "Type", "Page Title", "Page URL"];
+        const headers = ["Index", "Term", "Highlighted Text", "Context", "Type", "Pattern Label", "Pattern Category", "Pattern Tags", "Page Title", "Page URL"];
         let csvContent = headers.map(escapeCsvField).join(",") + "\n"; // Header row
 
         // Add data rows
         highlights.forEach((h, index) => {
+            const tags = Array.isArray(h.patternTags) ? h.patternTags : (typeof h.patternTags === 'string' && h.patternTags ? h.patternTags.split(',') : []);
             const row = [
                 index + 1,
                 h.term,
                 h.text,
-                h.context || '', // Use empty string if no context
+                h.context || '',
                 h.isProximity ? "Proximity" : "Standard/Regex",
+                h.patternLabel || '',
+                h.patternCategoryLabel || '',
+                tags.join(' | '),
                 pageTitle || '',
                 pageUrl || ''
             ];

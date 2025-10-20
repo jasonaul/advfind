@@ -86,11 +86,11 @@
         styleElement.id = 'afe-highlight-style';
         styleElement.textContent = `
             .${config.highlight.baseClass} {
-                background-color: yellow !important;
+                background-color: ${config.settings.defaultHighlightColor || yellow} !important;
                 color: black !important;
                 padding: 0.1em !important;
                 border-radius: 0.2em !important;
-                box-shadow: 0 0 0 1px yellow !important;
+                box-shadow: 0 0 0 1px ${config.settings.defaultHighlightColor || yellow} !important;
                 text-shadow: none !important;
             }
             
@@ -103,7 +103,7 @@
             
             :host .${config.highlight.baseClass},
             ::slotted(.${config.highlight.baseClass}) {
-                background-color: yellow !important;
+                background-color: ${config.settings.defaultHighlightColor || yellow} !important;
                 color: black !important;
             }
             
